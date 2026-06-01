@@ -37,7 +37,7 @@ def init_db():
 
 init_db()
 
-# --- WEB APP RECEPTION INTERFACE ---
+# --- WEB SERVER UI ROUTING ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -79,7 +79,7 @@ def verify_page(): return render_template_string(HTML_TEMPLATE)
 @app.route('/')
 def home(): return "Bot Web Stack Running!"
 
-# --- TELEGRAM KEYBOARDS (EXACT 6 BUTTONS ONLY) ---
+# --- TELEGRAM KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -88,9 +88,10 @@ def get_main_keyboard():
     return markup
 
 def get_verify_keyboard(chat_id):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    # CRITICAL FIXED: WebAppInfo ko Reply me nahi, hamesha InlineKeyboardMarkup me rakha jata hai!
+    markup = types.InlineKeyboardMarkup()
     url = f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}"
-    markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=url)))
+    markup.add(types.InlineKeyboardButton(text='🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=url)))
     return markup
 
 # --- CORE USER FLOW ---
@@ -101,7 +102,7 @@ def start(message):
     text_split = message.text.split()
     bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect('bot_data.db', check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
@@ -130,6 +131,9 @@ def start(message):
         markup.add(types.InlineKeyboardButton(text="✔️ Claim", callback_data="check_channels"))
         bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click Claim*", parse_mode='Markdown', reply_markup=markup)
     else:
+        # Puraani fansi hui screen hatane ke liye pehle KeyboardRemove bhejenge, phir direct Inline Button bhejenge
+        remove_markup = types.ReplyKeyboardRemove()
+        bot.send_message(message.chat.id, "🔄 Initializing verification system...", reply_markup=remove_markup)
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
 # --- WEB APP RECEPTION + SAME DEVICE BLOCK ENGINE ---
@@ -140,7 +144,7 @@ def handle_web_app_data(message):
         data = json.loads(message.web_app_data.data)
         if data.get("status") == "VERIFIED_OK":
             device_token = data.get("device", f"DEV_{user_id}")
-            conn = sqlite3.connect('bot_data.db')
+            conn = sqlite3.connect('bot_data.db', check_same_thread=False)
             cursor = conn.cursor()
             
             # Anti-Cheat Match check
@@ -175,7 +179,7 @@ def handle_web_app_data(message):
 def handle_menu_click(message):
     user_id = message.from_user.id
     text = message.text
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect('bot_data.db', check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
     user_status = cursor.fetchone()
@@ -187,21 +191,16 @@ def handle_menu_click(message):
 
     balance = user_status[1]
 
-    # 1. GIFT CODE (2 Options Only)
     if text == '🎉 Gift Code':
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🧭 Daily Bonus", callback_data="daily_bonus"), types.InlineKeyboardButton("🎁 Gift Code", callback_data="gift_code_prompt"))
         bot.send_message(message.chat.id, "✨ *Choose One:*", parse_mode='Markdown', reply_markup=markup)
 
-    # 2. BALANCE (With history & global pool tracker)
     elif text == '💰 Balance':
-        cursor.execute("SELECT bot_fund FROM settings WHERE id = 1")
-        bot_fund = cursor.fetchone()[0]
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📝 Withdrawal History", callback_data="w_history"), types.InlineKeyboardButton("💸 Bot Fund", callback_data="view_bot_fund"))
         bot.send_message(message.chat.id, f"💰 *Balance: ₹{balance:.2f}*\n\n🎉 Use 'Withdraw' Button to Withdraw The Balance!", parse_mode='Markdown', reply_markup=markup)
 
-    # 3. REFER & EARN (No contest button - 2 Options left)
     elif text == '👥 Refer & Earn':
         cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
         per_invite = cursor.fetchone()[0]
@@ -210,7 +209,6 @@ def handle_menu_click(message):
         markup.add(types.InlineKeyboardButton("🚀 My Invites", callback_data="my_invites"), types.InlineKeyboardButton("👥 Refer Tracker", callback_data="refer_tracker"))
         bot.send_message(message.chat.id, f"🎁 *Per Invite ₹{int(per_invite)} UPI Cash !!*\n\n🎁 *Invite Link :* {invite_link}\n\n_*Share Your Own Invite Link To Earn Unlimited Easy Cash! 💵*_", parse_mode='Markdown', reply_markup=markup)
 
-    # 4. WITHDRAW SYSTEM FLOW
     elif text == '💸 Withdraw':
         cursor.execute("SELECT min_withdraw FROM settings WHERE id = 1")
         min_w = cursor.fetchone()[0]
@@ -220,13 +218,11 @@ def handle_menu_click(message):
             msg = bot.send_message(message.chat.id, "Please type the *Amount* you want to withdraw:")
             bot.register_next_step_handler(msg, process_withdraw_amount, balance)
 
-    # 5. BET & EARN ARENA (Ludo + Wingo Only)
     elif text == '🎰 Bet & Earn':
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🎲 Ludo", callback_data="game_ludo"), types.InlineKeyboardButton("🟢 Wingo 🔴", callback_data="game_wingo"))
         bot.send_message(message.chat.id, "🎰 *Welcome to Bet & Earn Arena!*\nWin Big Cash & Have Fun!\n\n🎮 *Choose Your Game :*", parse_mode='Markdown', reply_markup=markup)
 
-    # 6. DYNAMIC EARN MORE
     elif text == '🚀 Earn More':
         cursor.execute("SELECT earn_more_link FROM settings WHERE id = 1")
         link = cursor.fetchone()[0]
@@ -248,7 +244,7 @@ def process_withdraw_amount(message, balance):
 def process_withdraw_upi(message, amount):
     user_id = message.from_user.id
     upi_id = message.text
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect('bot_data.db', check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
     cursor.execute("INSERT INTO withdraws (user_id, amount, upi_id) VALUES (?, ?, ?)", (user_id, amount, upi_id))
@@ -261,7 +257,7 @@ def process_withdraw_upi(message, amount):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect('bot_data.db', check_same_thread=False)
     cursor = conn.cursor()
     
     if call.data == "check_channels":
@@ -311,7 +307,6 @@ def handle_callbacks(call):
         for r in rows: msg += f"• User `{r[0]}` -> Status: *{r[1]}*\n"
         bot.send_message(call.message.chat.id, msg, parse_mode='Markdown')
 
-    # --- LUDO GAME BUTTON ENGINE ---
     elif call.data == "game_ludo":
         bot.answer_callback_query(call.id)
         markup = types.InlineKeyboardMarkup()
@@ -324,7 +319,6 @@ def handle_callbacks(call):
         msg = bot.send_message(call.message.chat.id, f"💬 Enter bet amount for *{choice}*:", parse_mode='Markdown')
         bot.register_next_step_handler(msg, process_ludo_calculation, choice)
 
-    # --- WINGO COLOR MATH GAME ENGINE ---
     elif call.data == "game_wingo":
         bot.answer_callback_query(call.id)
         markup = types.InlineKeyboardMarkup()
@@ -343,7 +337,7 @@ def process_ludo_calculation(message, choice):
     user_id = message.from_user.id
     try:
         bet = float(message.text)
-        conn = sqlite3.connect('bot_data.db')
+        conn = sqlite3.connect('bot_data.db', check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
         bal = cursor.fetchone()[0]
@@ -372,7 +366,7 @@ def process_wingo_calculation(message, choice):
     user_id = message.from_user.id
     try:
         bet = float(message.text)
-        conn = sqlite3.connect('bot_data.db')
+        conn = sqlite3.connect('bot_data.db', check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
         bal = cursor.fetchone()[0]
@@ -416,7 +410,7 @@ def handle_admin_commands(message):
     cmd = message.text.split()[0]
     args = message.text.replace(cmd, "").strip()
     
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect('bot_data.db', check_same_thread=False)
     cursor = conn.cursor()
     
     if cmd == '/setinvite' and args:
@@ -456,7 +450,7 @@ def handle_admin_commands(message):
     conn.commit()
     conn.close()
 
-# --- WEB SERVER INTERFACE TRIGGER LISTENER ---
+# --- DUAL WEB ENGINE LAUNCHER ---
 if __name__ == '__main__':
     import threading
     threading.Thread(target=bot.infinity_polling, daemon=True).start()
