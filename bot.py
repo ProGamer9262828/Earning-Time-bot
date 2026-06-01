@@ -47,6 +47,9 @@ def start(message):
     username = message.from_user.username or f"User_{user_id}"
     text_split = message.text.split()
     
+    # Kisi bhi purane phanse hue loop state ko clear karne ke liye
+    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+    
     conn = sqlite3.connect('bot_data.db')
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -54,8 +57,6 @@ def start(message):
     
     if not user:
         referrer = int(text_split[1]) if (len(text_split) > 1 and text_split[1].isdigit()) else None
-        
-        # Anti-Cheat: Agar banda khud ke hi dusre account se join kar raha hai (Same User Trigger)
         if referrer == user_id:
             referrer = None
 
@@ -80,12 +81,161 @@ def start(message):
         ask_verification(message.chat.id)
 
 def ask_verification(chat_id):
-    # Telegram Native Verification Inline Button
+    # Unverified user se normal keyboard chupa do takki loop na bane
+    hide_keyboard = types.ReplyKeyboardRemove()
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(text="🛡️ Click Here to Verify", callback_data="trigger_captcha"))
-    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup)
+    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup, navy=hide_keyboard)
 
-# --- INLINE CALLBACK HANDLING ---
+# --- CAPTCHA VALIDATION SYSTEM ---
+def verify_captcha_answer(message, correct_ans):
+    user_id = message.from_user.id
+    text = message.text
+    
+    # Agar user captcha ke beech me hi /start dabaye toh loop se bahaar nikalein
+    if text and text.startswith('/start'):
+        start(message)
+        return
+
+    try:
+        user_ans = int(text)
+        if user_ans == correct_ans:
+            conn = sqlite3.connect('bot_data.db')
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
+            
+            cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
+            ref_by = cursor.fetchone()[0]
+            
+            if ref_by:
+                cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
+                per_invite, current_fund = cursor.fetchone()
+                if current_fund >= per_invite:
+                    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (per_invite, ref_by))
+                    cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
+                    cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
+                    try:
+                        bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` ne verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
+                    except:
+                        pass
+            
+            conn.commit()
+            conn.close()
+            
+            bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+        else:
+            num1 = random.randint(1, 9)
+            num2 = random.randint(1, 9)
+            msg = bot.send_message(message.chat.id, f"❌ *Wrong Answer!* Try again carefully:\n👉 *{num1} + {num2} = ?*", parse_mode='Markdown')
+            bot.register_next_step_handler(msg, verify_captcha_answer, (num1+num2))
+    except (ValueError, TypeError):
+        msg = bot.send_message(message.chat.id, "🔢 Please enter a numeric answer only:")
+        bot.register_next_step_handler(msg, verify_captcha_answer, correct_ans)
+
+# --- TEXT BUTTONS HANDLING ---
+@bot.message_handler(func=lambda msg: True)
+def handle_menu_click(message):
+    user_id = message.from_user.id
+    text = message.text
+    
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
+    user_status = cursor.fetchone()
+    
+    if not user_status or user_status[0] == 0:
+        conn.close()
+        # Loop torne ke liye clear steps handler use karenge
+        bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+        ask_verification(message.chat.id)
+        return
+
+    balance = user_status[1]
+
+    if text == '🎉 Gift Code':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🧭 Daily Bonus", callback_data="daily_bonus"))
+        markup.add(types.InlineKeyboardButton("🎁 Gift Code", callback_data="claim_gift_code"))
+        bot.send_message(message.chat.id, "✨ *Choose One:*", parse_mode='Markdown', reply_markup=markup)
+
+    elif text == '💰 Balance':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📝 Withdrawal History", callback_data="w_history"))
+        markup.add(types.InlineKeyboardButton("💸 Bot Fund", callback_data="view_bot_fund"))
+        bot.send_message(message.chat.id, f"💰 *Balance: ₹{balance:.2f}*\n\n🎉 Use 'Withdraw' Button to Withdraw The Balance!", 
+                         parse_mode='Markdown', reply_markup=markup)
+
+    elif text == '👥 Refer & Earn':
+        cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
+        per_invite = cursor.fetchone()[0]
+        invite_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🚀 My Invites", callback_data="my_invites"), 
+                   types.InlineKeyboardButton("👥 Refer Tracker", callback_data="refer_tracker"))
+        bot.send_message(message.chat.id, f"🎁 *Per Invite ₹{int(per_invite)} UPI Cash !!*\n\n"
+                                          f"🎁 *Invite Link :* {invite_link}\n\n"
+                                          f"_*Share Your Own Invite Link To Earn Unlimited Easy Cash! 💵*_", 
+                         parse_mode='Markdown', reply_markup=markup)
+
+    elif text == '💸 Withdraw':
+        cursor.execute("SELECT min_withdraw FROM settings WHERE id = 1")
+        min_w = cursor.fetchone()[0]
+        if balance < min_w:
+            bot.send_message(message.chat.id, f"🤑 *You need minimum {int(min_w)} in balance to withdraw*", parse_mode='Markdown')
+        else:
+            msg = bot.send_message(message.chat.id, "Please type the *Amount* you want to withdraw:", parse_mode='Markdown')
+            bot.register_next_step_handler(msg, process_withdraw_amount, balance)
+
+    elif text == '🎰 Bet & Earn':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🎲 Ludo", callback_data="game_ludo"))
+        markup.add(types.InlineKeyboardButton("🟢 Wingo 🔴", callback_data="game_wingo"))
+        bot.send_message(message.chat.id, "🎰 *Welcome to Bet & Earn Arena!*\nWin Big Cash & Have Fun!\n\n🎮 *Choose Your Game :*", 
+                         parse_mode='Markdown', reply_markup=markup)
+
+    elif text == '🚀 Earn More':
+        cursor.execute("SELECT earn_more_link FROM settings WHERE id = 1")
+        link = cursor.fetchone()[0]
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔗 Visit Now", url=link))
+        bot.send_message(message.chat.id, "🚀 Click the button below to complete tasks and earn more cash!", reply_markup=markup)
+
+    conn.close()
+
+# --- WITHDRAW FLOW ---
+def process_withdraw_amount(message, balance):
+    if message.text and message.text.startswith('/start'):
+        start(message)
+        return
+    try:
+        amount = float(message.text)
+        if amount > balance or amount <= 0:
+            bot.send_message(message.chat.id, "❌ Invalid amount or insufficient balance.")
+        else:
+            msg = bot.send_message(message.chat.id, "Now type your valid *UPI ID* to receive payment:", parse_mode='Markdown')
+            bot.register_next_step_handler(msg, process_withdraw_upi, amount)
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Please enter valid digits.")
+
+def process_withdraw_upi(message, amount):
+    if message.text and message.text.startswith('/start'):
+        start(message)
+        return
+    user_id = message.from_user.id
+    upi_id = message.text
+    
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
+    cursor.execute("INSERT INTO withdraws (user_id, amount, upi_id) VALUES (?, ?, ?)", (user_id, amount, upi_id))
+    conn.commit()
+    conn.close()
+    
+    bot.send_message(message.chat.id, "✅ *Withdrawal Request Submitted!* Status: Pending Admin Approval.", parse_mode='Markdown', reply_markup=get_main_keyboard())
+    bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`\n\nApprove via `/approve <ID>` command.", parse_mode='Markdown')
+
+# --- INLINE CALLBACKS ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -95,16 +245,6 @@ def handle_callbacks(call):
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
         ask_verification(call.message.chat.id)
-
-    elif call.data == "trigger_captcha":
-        bot.answer_callback_query(call.id)
-        # Math Captcha Generation
-        num1 = random.randint(1, 9)
-        num2 = random.randint(1, 9)
-        ans = num1 + num2
-        
-        msg = bot.send_message(call.message.chat.id, f"🔢 *Anti-Bot Security Check:*\n\nSolve this simple math task to continue:\n👉 *{num1} + {num2} = ?*", parse_mode='Markdown')
-        bot.register_next_step_handler(msg, verify_captcha_answer, ans)
 
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
@@ -171,143 +311,11 @@ def handle_callbacks(call):
 
     conn.close()
 
-# --- CAPTCHA VALIDATION SYSTEM ---
-def verify_captcha_answer(message, correct_ans):
-    user_id = message.from_user.id
-    try:
-        user_ans = int(message.text)
-        if user_ans == correct_ans:
-            conn = sqlite3.connect('bot_data.db')
-            cursor = conn.cursor()
-            
-            # Anti-Cheat Protection Logic (Database-level cross verification)
-            cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
-            
-            # Credit Referral balance instantly to main user
-            cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
-            ref_by = cursor.fetchone()[0]
-            
-            if ref_by:
-                cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
-                per_invite, current_fund = cursor.fetchone()
-                if current_fund >= per_invite:
-                    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (per_invite, ref_by))
-                    cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
-                    cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
-                    bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` ne verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
-            
-            conn.commit()
-            conn.close()
-            
-            bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
-        else:
-            msg = bot.send_message(message.chat.id, "❌ *Wrong Answer!* Try again carefully:")
-            # Re-generate if failed
-            num1 = random.randint(1, 9)
-            num2 = random.randint(1, 9)
-            msg = bot.send_message(message.chat.id, f"👉 *{num1} + {num2} = ?*")
-            bot.register_next_step_handler(msg, verify_captcha_answer, (num1+num2))
-    except ValueError:
-        msg = bot.send_message(message.chat.id, "🔢 Please enter a numeric answer only:")
-        bot.register_next_step_handler(msg, verify_captcha_answer, correct_ans)
-
-# --- TEXT BUTTONS HANDLING ---
-@bot.message_handler(func=lambda msg: True)
-def handle_menu_click(message):
-    user_id = message.from_user.id
-    text = message.text
-    
-    conn = sqlite3.connect('bot_data.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
-    user_status = cursor.fetchone()
-    
-    if not user_status or user_status[0] == 0:
-        bot.send_message(message.chat.id, "❌ Please complete your verification first!")
-        conn.close()
-        return
-
-    balance = user_status[1]
-
-    if text == '🎉 Gift Code':
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🧭 Daily Bonus", callback_data="daily_bonus"))
-        markup.add(types.InlineKeyboardButton("🎁 Gift Code", callback_data="claim_gift_code"))
-        bot.send_message(message.chat.id, "✨ *Choose One:*", parse_mode='Markdown', reply_markup=markup)
-
-    elif text == '💰 Balance':
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("📝 Withdrawal History", callback_data="w_history"))
-        markup.add(types.InlineKeyboardButton("💸 Bot Fund", callback_data="view_bot_fund"))
-        bot.send_message(message.chat.id, f"💰 *Balance: ₹{balance:.2f}*\n\n🎉 Use 'Withdraw' Button to Withdraw The Balance!", 
-                         parse_mode='Markdown', reply_markup=markup)
-
-    elif text == '👥 Refer & Earn':
-        cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
-        per_invite = cursor.fetchone()[0]
-        invite_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🚀 My Invites", callback_data="my_invites"), 
-                   types.InlineKeyboardButton("👥 Refer Tracker", callback_data="refer_tracker"))
-        bot.send_message(message.chat.id, f"🎁 *Per Invite ₹{int(per_invite)} UPI Cash !!*\n\n"
-                                          f"🎁 *Invite Link :* {invite_link}\n\n"
-                                          f"_*Share Your Own Invite Link To Earn Unlimited Easy Cash! 💵*_", 
-                         parse_mode='Markdown', reply_markup=markup)
-
-    elif text == '💸 Withdraw':
-        cursor.execute("SELECT min_withdraw FROM settings WHERE id = 1")
-        min_w = cursor.fetchone()[0]
-        if balance < min_w:
-            bot.send_message(message.chat.id, f"🤑 *You need minimum {int(min_w)} in balance to withdraw*", parse_mode='Markdown')
-        else:
-            msg = bot.send_message(message.chat.id, "Please type the *Amount* you want to withdraw:", parse_mode='Markdown')
-            bot.register_next_step_handler(msg, process_withdraw_amount, balance)
-
-    elif text == '🎰 Bet & Earn':
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🎲 Ludo", callback_data="game_ludo"))
-        markup.add(types.InlineKeyboardButton("🟢 Wingo 🔴", callback_data="game_wingo"))
-        bot.send_message(message.chat.id, "🎰 *Welcome to Bet & Earn Arena!*\nWin Big Cash & Have Fun!\n\n🎮 *Choose Your Game :*", 
-                         parse_mode='Markdown', reply_markup=markup)
-
-    elif text == '🚀 Earn More':
-        cursor.execute("SELECT earn_more_link FROM settings WHERE id = 1")
-        link = cursor.fetchone()[0]
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔗 Visit Now", url=link))
-        bot.send_message(message.chat.id, "🚀 Click the button below to complete tasks and earn more cash!", reply_markup=markup)
-
-    conn.close()
-
-# --- WITHDRAW FLOW ---
-def process_withdraw_amount(message, balance):
-    try:
-        amount = float(message.text)
-        if amount > balance or amount <= 0:
-            bot.send_message(message.chat.id, "❌ Invalid amount or insufficient balance.")
-        else:
-            msg = bot.send_message(message.chat.id, "Now type your valid *UPI ID* to receive payment:", parse_mode='Markdown')
-            bot.register_next_step_handler(msg, process_withdraw_upi, amount)
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ Please enter valid digits.")
-
-def process_withdraw_upi(message, amount):
-    user_id = message.from_user.id
-    upi_id = message.text
-    
-    conn = sqlite3.connect('bot_data.db')
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
-    cursor.execute("INSERT INTO withdraws (user_id, amount, upi_id) VALUES (?, ?, ?)", (user_id, amount, upi_id))
-    conn.commit()
-    conn.close()
-    
-    bot.send_message(message.chat.id, "✅ *Withdrawal Request Submitted!* Status: Pending Admin Approval.", parse_mode='Markdown', reply_markup=get_main_keyboard())
-    bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`\n\nApprove via `/approve <ID>` command.", parse_mode='Markdown')
-
 # --- LUDO GAME CALCULATION ---
 def process_ludo_bet(message, choice):
+    if message.text and message.text.startswith('/start'):
+        start(message)
+        return
     user_id = message.from_user.id
     try:
         bet_amount = float(message.text)
@@ -328,11 +336,11 @@ def process_ludo_bet(message, choice):
         if choice == result_bucket:
             cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet_amount, user_id))
             cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (bet_amount,))
-            bot.send_message(message.chat.id, f"🥳 *Whohoo! You Won!*\n₹{bet_amount * 2} credited successfully (Double mapping!).", parse_mode='Markdown')
+            bot.send_message(message.chat.id, f"🥳 *Whohoo! You Won!*\n₹{bet_amount * 2} credited successfully (Double mapping!).", parse_mode='Markdown', reply_markup=get_main_keyboard())
         else:
             cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (bet_amount, user_id))
             cursor.execute("UPDATE settings SET bot_fund = bot_fund + ? WHERE id = 1", (bet_amount,))
-            bot.send_message(message.chat.id, f"😭 *You Lost the Bet!*\n₹{bet_amount} cut down from wallet balances.", parse_mode='Markdown')
+            bot.send_message(message.chat.id, f"😭 *You Lost the Bet!*\n₹{bet_amount} cut down from wallet balances.", parse_mode='Markdown', reply_markup=get_main_keyboard())
             
         conn.commit()
         conn.close()
