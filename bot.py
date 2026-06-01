@@ -47,7 +47,7 @@ def start(message):
     username = message.from_user.username or f"User_{user_id}"
     text_split = message.text.split()
     
-    # Kisi bhi purane phanse hue loop state ko clear karne ke liye
+    # Sabse pehle purane saare fansi hue states ko flush karke khatam karo
     bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     
     conn = sqlite3.connect('bot_data.db')
@@ -64,7 +64,13 @@ def start(message):
         if referrer:
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
-    
+    else:
+        # Agar user pehle se registered hai aur verified hai, toh seedha menu do
+        if user[4] == 1:
+            bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
+            conn.close()
+            return
+            
     cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
     channels_str = cursor.fetchone()[0]
     channels = eval(channels_str) if channels_str else []
@@ -81,18 +87,17 @@ def start(message):
         ask_verification(message.chat.id)
 
 def ask_verification(chat_id):
-    # Unverified user se normal keyboard chupa do takki loop na bane
+    # Unverified banday ke screen se normal keyboard clear kar do taaki kachra click na ho
     hide_keyboard = types.ReplyKeyboardRemove()
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(text="🛡️ Click Here to Verify", callback_data="trigger_captcha"))
-    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup, navy=hide_keyboard)
+    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup, reply_to_message_id=None)
 
 # --- CAPTCHA VALIDATION SYSTEM ---
 def verify_captcha_answer(message, correct_ans):
     user_id = message.from_user.id
     text = message.text
     
-    # Agar user captcha ke beech me hi /start dabaye toh loop se bahaar nikalein
     if text and text.startswith('/start'):
         start(message)
         return
@@ -122,6 +127,7 @@ def verify_captcha_answer(message, correct_ans):
             conn.commit()
             conn.close()
             
+            # CRITICAL FIX: Sahi answer par get_main_keyboard bhej rahe hain jisse buttons open honge!
             bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
         else:
             num1 = random.randint(1, 9)
@@ -145,7 +151,6 @@ def handle_menu_click(message):
     
     if not user_status or user_status[0] == 0:
         conn.close()
-        # Loop torne ke liye clear steps handler use karenge
         bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
         ask_verification(message.chat.id)
         return
