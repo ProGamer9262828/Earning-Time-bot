@@ -12,12 +12,19 @@ BOT_TOKEN = "8473027179:AAF-9rouF_79QAZRNLIeDnHNgg3-VPeq1RQ"
 ADMIN_ID = 8031127296
 RAILWAY_DOMAIN = "https://earning-time-bot-production.up.railway.app" 
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 
-# --- DATABASE SETUP ---
+# --- SAFE DATABASE UTILITIES ---
+DB_FILE = 'bot_data.db'
+
+def get_db_connection():
+    # check_same_thread=False allows multi-threaded Flask/Telebot processing safely
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=10)
+    return conn
+
 def init_db():
-    conn = sqlite3.connect('bot_data.db', check_same_thread=False)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS settings (
                         id INTEGER PRIMARY KEY, per_invite REAL, min_withdraw REAL, 
@@ -37,7 +44,7 @@ def init_db():
 
 init_db()
 
-# --- WEB SERVER UI ROUTING (100% FIXED DATA PASS) ---
+# --- WEB SERVER UI ROUTING ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -68,11 +75,8 @@ HTML_TEMPLATE = """
         tg.expand();
         
         function sendDataToBot() {
-            // Browser signature fingerprint simulation for Auto-Detection
-            const fingerprint = navigator.userAgent + "_" + screen.width + "x" + screen.height;
+            const fingerprint = btoa(navigator.userAgent).substring(0, 20) + "_" + screen.width + "x" + screen.height;
             const payload = { status: "VERIFIED_OK", device: fingerprint };
-            
-            // Fixed connection trigger
             tg.sendData(JSON.stringify(payload));
             tg.close();
         }
@@ -98,7 +102,6 @@ def get_main_keyboard():
     return markup
 
 def get_verify_keyboard(chat_id):
-    # CRITICAL FIX: Keyboard Button use kar rahe hain takki tg.sendData() response pass kar sake!
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     web_app_url = f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}"
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
@@ -113,7 +116,7 @@ def start(message):
     
     bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     
-    conn = sqlite3.connect('bot_data.db')
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
@@ -126,14 +129,19 @@ def start(message):
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
     else:
-        if user[5] == 1: # is_verified check
+        if user[5] == 1: 
             bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
             conn.close()
             return
             
     cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
     channels_str = cursor.fetchone()[0]
-    channels = eval(channels_str) if channels_str else []
+    
+    try:
+        channels = json.loads(channels_str) if channels_str else []
+    except:
+        channels = []
+        
     conn.close()
     
     if channels:
@@ -154,21 +162,18 @@ def handle_web_app_data(message):
         if data.get("status") == "VERIFIED_OK":
             device_token = data.get("device", f"DEV_{user_id}")
             
-            conn = sqlite3.connect('bot_data.db')
+            conn = get_db_connection()
             cursor = conn.cursor()
             
-            # 🔥 AUTO DETECT SAME DEVICE ANTI-CHEAT
             cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (device_token, user_id))
             duplicate = cursor.fetchone()
             
             if duplicate:
-                bot.send_message(message.chat.id, "❌ *Same Device Detected!*\n\nEk hi phone se multiple accounts verify karna allowed nahi hai. Verification failed!", parse_mode='Markdown')
+                bot.send_message(message.chat.id, "❌ *Same Device Detected!*\n\nEk hi phone se multiple accounts verify karna allowed nahi hai.", parse_mode='Markdown')
                 conn.close()
                 return
             
-            # Mark Verification true & save phone fingerprint token
             cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (device_token, user_id))
-            
             cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
             ref_by = cursor.fetchone()[0]
             
@@ -185,8 +190,6 @@ def handle_web_app_data(message):
             
             conn.commit()
             conn.close()
-            
-            # Instant home menu pop-up setup
             bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
@@ -197,7 +200,7 @@ def handle_menu_click(message):
     user_id = message.from_user.id
     text = message.text
     
-    conn = sqlite3.connect('bot_data.db')
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
     user_status = cursor.fetchone()
@@ -247,29 +250,43 @@ def handle_menu_click(message):
 def process_withdraw_amount(message, balance):
     try:
         amount = float(message.text)
-        if amount > balance or amount <= 0: bot.send_message(message.chat.id, "❌ Invalid amount.")
-        else:
-            msg = bot.send_message(message.chat.id, "Now type your valid *UPI ID*:")
-            bot.register_next_step_handler(msg, process_withdraw_upi, amount)
-    except: bot.send_message(message.chat.id, "❌ Invalid digits.")
+        if amount > balance or amount <= 0: 
+            bot.send_message(message.chat.id, "❌ Invalid amount. Transaction cancelled.")
+            return
+        msg = bot.send_message(message.chat.id, "Now type your valid *UPI ID*:")
+        bot.register_next_step_handler(msg, process_withdraw_upi, amount)
+    except ValueError: 
+        bot.send_message(message.chat.id, "❌ Please enter numbers only.")
 
 def process_withdraw_upi(message, amount):
     user_id = message.from_user.id
     upi_id = message.text
-    conn = sqlite3.connect('bot_data.db')
+    
+    conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    current_balance = cursor.fetchone()[0]
+    
+    if amount > current_balance:
+        bot.send_message(message.chat.id, "❌ Insufficient funds.")
+        conn.close()
+        return
+
     cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
     cursor.execute("INSERT INTO withdraws (user_id, amount, upi_id) VALUES (?, ?, ?)", (user_id, amount, upi_id))
     conn.commit()
     conn.close()
+    
     bot.send_message(message.chat.id, "✅ *Withdrawal Request Submitted!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
-    bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`", parse_mode='Markdown')
+    try:
+        bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`", parse_mode='Markdown')
+    except: pass
 
 # --- CALLBACK ROUTINGS ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
-    conn = sqlite3.connect('bot_data.db')
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     if call.data == "check_channels":
@@ -277,10 +294,27 @@ def handle_callbacks(call):
         bot.send_message(call.message.chat.id, "🛡 *Verify Yourself To Start Bot*", reply_markup=get_verify_keyboard(call.message.chat.id))
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
+        
+        # Implement 24-hour daily cooldown to prevent spamming the button
+        cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
+        last_time_str = cursor.fetchone()[0]
+        
+        now = datetime.now()
+        if last_time_str:
+            last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
+            if now - last_time < timedelta(days=1):
+                rem_time = timedelta(days=1) - (now - last_time)
+                hours, remainder = divmod(rem_time.seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                bot.send_message(call.message.chat.id, f"⏳ *Daily Bonus claimed!* Please wait `{hours}h {minutes}m` to spin again.", parse_mode="Markdown")
+                conn.close()
+                return
+                
         dice_roll = random.randint(1, 6)
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (dice_roll, user_id))
+        cursor.execute("UPDATE users SET balance = balance + ?, last_bonus_time = ? WHERE user_id = ?", (dice_roll, now.strftime('%Y-%m-%d %H:%M:%S'), user_id))
         conn.commit()
         bot.send_message(call.message.chat.id, f"🎲 *Dice Rolled!* You got ₹{dice_roll}!")
+        
     elif call.data == "view_bot_fund":
         bot.answer_callback_query(call.id)
         cursor.execute("SELECT bot_fund FROM settings WHERE id = 1")
@@ -307,29 +341,39 @@ def process_ludo_bet(message, choice):
     user_id = message.from_user.id
     try:
         bet_amount = float(message.text)
-        conn = sqlite3.connect('bot_data.db')
+        if bet_amount <= 0:
+            bot.send_message(message.chat.id, "❌ Invalid Bet Amount.")
+            return
+
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
         balance = cursor.fetchone()[0]
+        
         if bet_amount > balance:
             bot.send_message(message.chat.id, "❌ Low Balance.")
             conn.close()
             return
+            
         dice_out = random.randint(1, 6)
-        res = "BIG" if dice_out in [4,5,6] else "SMALL"
+        res = "BIG" if dice_out in [4, 5, 6] else "SMALL"
+        
         if choice == res:
             cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet_amount, user_id))
-            bot.send_message(message.chat.id, f"🎲 Result: {dice_out}. 🥳 *You Won! Balance Doubled!*", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, f"🎲 Result: {dice_out}. 🥳 *You Won! Balance Doubled!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
         else:
             cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (bet_amount, user_id))
-            bot.send_message(message.chat.id, f"🎲 Result: {dice_out}. 😭 *You Lost!*", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, f"🎲 Result: {dice_out}. 😭 *You Lost!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+        
         conn.commit()
         conn.close()
-    except: pass
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Cancelled. Enter numerical values only.")
 
 # --- DUAL WEB ENGINE LAUNCHER ---
 if __name__ == '__main__':
     import threading
-    threading.Thread(target=bot.infinity_polling, daemon=True).start()
+    # Enabled threading configuration inside Telebot launcher to match daemon properties
+    threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
