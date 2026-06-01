@@ -10,7 +10,7 @@ BOT_TOKEN = "8473027179:AAF-9rouF_79QAZRNLIeDnHNgg3-VPeq1RQ"
 ADMIN_ID = 8031127296
 
 # ⚠️ APNA RAILWAY GENERATED DOMAIN YAHAN PASTE KAREIN (Bina aakhiri slash '/' ke)
-RAILWAY_DOMAIN = "https://your-project-name.up.railway.app" 
+RAILWAY_DOMAIN = "https://earning-time-bot-production.up.railway.app"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
