@@ -218,12 +218,61 @@ def handle_menu_click(message):
         markup.add(types.InlineKeyboardButton("📝 Withdrawal History", callback_data="w_history"), types.InlineKeyboardButton("💸 Bot Fund", callback_data="view_bot_fund"))
         bot.send_message(message.chat.id, f"💰 *Balance: ₹{balance:.2f}*\n\n🎉 Use 'Withdraw' Button to Withdraw!", parse_mode='Markdown', reply_markup=markup)
     elif text == '👥 Refer & Earn':
-        cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
-        per_invite = cursor.fetchone()[0]
-        invite_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🚀 My Invites", callback_data="my_invites"))
-        bot.send_message(message.chat.id, f"🎁 *Per Invite ₹{int(per_invite)} UPI Cash !!*\n\n🎁 *Invite Link :* {invite_link}", parse_mode='Markdown', reply_markup=markup)
+    try:
+        bot_info = bot.get_me()
+    if not bot_info.username:
+        bot.send_message(
+            message.chat.id,
+            "❌ Bot username not found. Set bot username from BotFather."
+        )
+        conn.close()
+        return
+
+    cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
+    per_invite = cursor.fetchone()[0]
+
+    invite_link = f"https://t.me/{bot_info.username}?start={user_id}"
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?",
+        (user_id,)
+    )
+    total_invites = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND status = 'Success & Verified'",
+        (user_id,)
+    )
+    successful_invites = cursor.fetchone()[0]
+
+    pending_invites = total_invites - successful_invites
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            "📊 Refresh Stats",
+            callback_data="my_invites"
+        )
+    )
+
+    bot.send_message(
+        message.chat.id,
+        f"👥 *Refer & Earn*\n\n"
+        f"💸 Per Invite Reward: ₹{per_invite}\n\n"
+        f"🔗 *Your Personal Referral Link:*\n"
+        f"`{invite_link}`\n\n"
+        f"📨 Total Invites: {total_invites}\n"
+        f"✅ Successful: {successful_invites}\n"
+        f"⏳ Pending: {pending_invites}\n\n"
+        f"🎉 Share your link and earn money!",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+except Exception as e:
+        bot.send_message(
+            message.chat.id,
+            f"❌ Referral Error:\n{e}"
+        )
     elif text == '💸 Withdraw':
         cursor.execute("SELECT min_withdraw FROM settings WHERE id = 1")
         min_w = cursor.fetchone()[0]
@@ -289,8 +338,31 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
         bot.send_message(call.message.chat.id, "📝 No recent records.")
     elif call.data == "my_invites":
-        bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, "🚀 Use Tracker to see analytics.")
+
+    bot.answer_callback_query(call.id)
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?",
+        (user_id,)
+    )
+    total_invites = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND status = 'Success & Verified'",
+        (user_id,)
+    )
+    successful_invites = cursor.fetchone()[0]
+
+    pending_invites = total_invites - successful_invites
+
+    bot.send_message(
+        call.message.chat.id,
+        f"📊 *Referral Statistics*\n\n"
+        f"📨 Total Invites: {total_invites}\n"
+        f"✅ Successful: {successful_invites}\n"
+        f"⏳ Pending: {pending_invites}",
+        parse_mode="Markdown"
+    )
     elif call.data == "game_ludo":
         bot.answer_callback_query(call.id)
         markup = types.InlineKeyboardMarkup()
