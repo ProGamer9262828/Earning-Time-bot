@@ -98,7 +98,6 @@ def get_main_keyboard():
     return markup
 
 def get_verify_keyboard(chat_id):
-    # CRITICAL FIX: Keyboard Button use kar rahe hain takki tg.sendData() response pass kar sake!
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     web_app_url = f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}"
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
@@ -123,7 +122,8 @@ def start(message):
         if referrer == user_id: referrer = None
         cursor.execute("INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)", (user_id, username, referrer))
         if referrer:
-            cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
+            # Entry saved into tracking ledger as unverified by default
+            cursor.execute("INSERT INTO referrals (referrer_id, referee_id, status) VALUES (?, ?, 'Incomplete/Fake')", (referrer, user_id))
         conn.commit()
     else:
         if user[5] == 1: # is_verified check
@@ -145,7 +145,7 @@ def start(message):
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-# --- WEB APP REAL-TIME RESPONSE ---
+# --- WEB APP REAL-TIME RESPONSE + REWARD TRIGGER ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
@@ -166,9 +166,10 @@ def handle_web_app_data(message):
                 conn.close()
                 return
             
-            # Mark Verification true & save phone fingerprint token
+            # Update user verification clearance
             cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (device_token, user_id))
             
+            # Process referral bonus calculations if referee matches successfully
             cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
             ref_by = cursor.fetchone()[0]
             
@@ -178,7 +179,8 @@ def handle_web_app_data(message):
                 if current_fund >= per_invite:
                     cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (per_invite, ref_by))
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
-                    cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
+                    # Status changes from Incomplete/Fake to Success inside ledger database
+                    cursor.execute("UPDATE referrals SET status = 'Success' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try:
                         bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` ne verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
                     except: pass
@@ -186,7 +188,6 @@ def handle_web_app_data(message):
             conn.commit()
             conn.close()
             
-            # Instant home menu pop-up setup
             bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
@@ -213,17 +214,33 @@ def handle_menu_click(message):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🧭 Daily Bonus", callback_data="daily_bonus"))
         bot.send_message(message.chat.id, "✨ *Choose One:*", parse_mode='Markdown', reply_markup=markup)
+        
     elif text == '💰 Balance':
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📝 Withdrawal History", callback_data="w_history"), types.InlineKeyboardButton("💸 Bot Fund", callback_data="view_bot_fund"))
         bot.send_message(message.chat.id, f"💰 *Balance: ₹{balance:.2f}*\n\n🎉 Use 'Withdraw' Button to Withdraw!", parse_mode='Markdown', reply_markup=markup)
+        
+    # 🔥 EXCLUSIVE REFER & EARN SUB MENU LOGIC FIT (500+ WORDS DETAILED SCOPE)
     elif text == '👥 Refer & Earn':
         cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
         per_invite = cursor.fetchone()[0]
         invite_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🚀 My Invites", callback_data="my_invites"))
-        bot.send_message(message.chat.id, f"🎁 *Per Invite ₹{int(per_invite)} UPI Cash !!*\n\n🎁 *Invite Link :* {invite_link}", parse_mode='Markdown', reply_markup=markup)
+        
+        # Niche ke 2 clean buttons (My Invites & Refer Tracker)
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🚀 My Invites", callback_data="my_invites"),
+            types.InlineKeyboardButton("👥 Refer Tracker", callback_data="refer_tracker")
+        )
+        
+        msg_text = (
+            f"🎁 *Per Invite ₹{int(per_invite)} UPI Cash !!*\n\n"
+            f"🎁 *Your Invite Link :*\n`{invite_link}`\n\n"
+            f"_*Share Your Own Invite Link To Earn Unlimited Easy Cash! 💵*_\n"
+            f"⚠️ _Note: Reward will be credited only after successful verification check._"
+        )
+        bot.send_message(message.chat.id, msg_text, parse_mode='Markdown', reply_markup=markup)
+        
     elif text == '💸 Withdraw':
         cursor.execute("SELECT min_withdraw FROM settings WHERE id = 1")
         min_w = cursor.fetchone()[0]
@@ -232,16 +249,19 @@ def handle_menu_click(message):
         else:
             msg = bot.send_message(message.chat.id, "Please type the *Amount* you want to withdraw:")
             bot.register_next_step_handler(msg, process_withdraw_amount, balance)
+            
     elif text == '🎰 Bet & Earn':
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🎲 Ludo", callback_data="game_ludo"))
         bot.send_message(message.chat.id, "🎰 *Choose Your Game :*", parse_mode='Markdown', reply_markup=markup)
+        
     elif text == '🚀 Earn More':
         cursor.execute("SELECT earn_more_link FROM settings WHERE id = 1")
         link = cursor.fetchone()[0]
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🔗 Visit Now", url=link))
         bot.send_message(message.chat.id, "🚀 Click below to earn more cash!", reply_markup=markup)
+        
     conn.close()
 
 def process_withdraw_amount(message, balance):
@@ -265,7 +285,7 @@ def process_withdraw_upi(message, amount):
     bot.send_message(message.chat.id, "✅ *Withdrawal Request Submitted!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`", parse_mode='Markdown')
 
-# --- CALLBACK ROUTINGS ---
+# --- CALLBACK ROUTINGS & REFER METRICS SUB-LOGIC ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -275,32 +295,80 @@ def handle_callbacks(call):
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
         bot.send_message(call.message.chat.id, "🛡 *Verify Yourself To Start Bot*", reply_markup=get_verify_keyboard(call.message.chat.id))
+        
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
         dice_roll = random.randint(1, 6)
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (dice_roll, user_id))
         conn.commit()
         bot.send_message(call.message.chat.id, f"🎲 *Dice Rolled!* You got ₹{dice_roll}!")
+        
     elif call.data == "view_bot_fund":
         bot.answer_callback_query(call.id)
         cursor.execute("SELECT bot_fund FROM settings WHERE id = 1")
         bot.send_message(call.message.chat.id, f"🟢 *Remaining Fund >>* ₹{cursor.fetchone()[0]:.2f}")
+        
     elif call.data == "w_history":
         bot.answer_callback_query(call.id)
         bot.send_message(call.message.chat.id, "📝 No recent records.")
+        
+    # 🔥 1. MY INVITES INSIDE METRICS CALCULATION
     elif call.data == "my_invites":
         bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, "🚀 Use Tracker to see analytics.")
+        
+        # Count verified real successful invites
+        cursor.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND status = 'Success'", (user_id,))
+        total_success = cursor.fetchone()[0]
+        
+        # Count fake / unverified users who left
+        cursor.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND status != 'Success'", (user_id,))
+        total_incomplete = cursor.fetchone()[0]
+        
+        metrics_text = (
+            "📊 *Your Personal Invitation Metrics:*\n\n"
+            f"✅ *Total Invited (Verified):* `{total_success}` users\n"
+            f"❌ *Incomplete/Fake Invites:* `{total_incomplete}` users\n\n"
+            f"💡 _Tip: Incomplete metrics represent users who clicked start but never passed verification interface screen link._"
+        )
+        bot.send_message(call.message.chat.id, metrics_text, parse_mode='Markdown')
+
+    # 🔥 2. REFER TRACKER COMMISSION LEDGER LOGS
+    elif call.data == "refer_tracker":
+        bot.answer_callback_query(call.id)
+        
+        cursor.execute("SELECT referee_id, status FROM referrals WHERE referrer_id = ? ORDER BY id DESC LIMIT 8", (user_id,))
+        logs = cursor.fetchall()
+        
+        cursor.execute("SELECT per_invite FROM settings WHERE id = 1")
+        comm_rate = cursor.fetchone()[0]
+        
+        if not logs:
+            tracker_text = "👥 *Refer Tracker Log:*\n\nNo referral tracking history found yet. Share your link to start tracking!"
+        else:
+            tracker_text = "👥 *Live Refer Tracker (Last 8 Logs):*\n\n"
+            for index, row in enumerate(logs, 1):
+                referee_id = row[0]
+                current_status = row[1]
+                
+                if current_status == 'Success':
+                    tracker_text += f"{index}. 👤 User: `{referee_id}` ➔ *Verified* (Payout: +₹{comm_rate:.1f} ✅)\n"
+                else:
+                    tracker_text += f"{index}. 👤 User: `{referee_id}` ➔ *{current_status}* (Payout: ₹0 ⏳)\n"
+                    
+        bot.send_message(call.message.chat.id, tracker_text, parse_mode='Markdown')
+        
     elif call.data == "game_ludo":
         bot.answer_callback_query(call.id)
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🔴 Big", callback_data="ludo_big"), types.InlineKeyboardButton("🔵 Small", callback_data="ludo_small"))
         bot.send_message(call.message.chat.id, "🎲 Select Bucket:", reply_markup=markup)
+        
     elif call.data in ["ludo_big", "ludo_small"]:
         bot.answer_callback_query(call.id)
         choice = "BIG" if call.data == "ludo_big" else "SMALL"
         msg = bot.send_message(call.message.chat.id, f"💬 Enter amount to bet on {choice}:")
         bot.register_next_step_handler(msg, process_ludo_bet, choice)
+        
     conn.close()
 
 def process_ludo_bet(message, choice):
@@ -326,6 +394,26 @@ def process_ludo_bet(message, choice):
         conn.commit()
         conn.close()
     except: pass
+
+# --- EXCLUSIVE ADMIN LIVE COMMAND CONTROL DESK ---
+@bot.message_handler(commands=['setinvite'])
+def set_invite_amount(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    text_args = message.text.split()
+    if len(text_args) > 1:
+        try:
+            new_val = float(text_args[1])
+            conn = sqlite3.connect('bot_data.db')
+            cursor = conn.cursor()
+            cursor.execute("UPDATE settings SET per_invite = ? WHERE id = 1", (new_val,))
+            conn.commit()
+            conn.close()
+            bot.send_message(message.chat.id, f"✅ *Success:* Live per invite commission changed to *₹{new_val}*!", parse_mode='Markdown')
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ Enter valid numerical value only.", parse_mode='Markdown')
+    else:
+        bot.send_message(message.chat.id, "💬 Usage format: `/setinvite <amount>`", parse_mode='Markdown')
 
 # --- DUAL WEB ENGINE LAUNCHER ---
 if __name__ == '__main__':
