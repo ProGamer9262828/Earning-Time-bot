@@ -1,5 +1,6 @@
 import sqlite3
 import random
+import json
 import telebot
 from telebot import types
 from datetime import datetime, timedelta
@@ -7,6 +8,9 @@ from datetime import datetime, timedelta
 # --- CONFIGURATION ---
 BOT_TOKEN = "8473027179:AAF-9rouF_79QAZRNLIeDnHNgg3-VPeq1RQ"
 ADMIN_ID = 8031127296
+
+# ⚠️ APNA RAILWAY GENERATED DOMAIN YAHAN PASTE KAREIN (Bina aakhiri slash '/' ke)
+RAILWAY_DOMAIN = "https://your-project-name.up.railway.app" 
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -18,8 +22,8 @@ def init_db():
                         id INTEGER PRIMARY KEY, per_invite REAL, min_withdraw REAL, 
                         bot_fund REAL, earn_more_link TEXT, mandatory_channels TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        user_id INTEGER PRIMARY KEY, username TEXT, balance REAL DEFAULT 0.0, 
-                        referred_by INTEGER, is_verified INTEGER DEFAULT 0, last_bonus_time TEXT)''')
+                        user_id INTEGER PRIMARY KEY, balance REAL DEFAULT 0.0, 
+                        referred_by INTEGER, device_token TEXT, is_verified INTEGER DEFAULT 0, last_bonus_time TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS referrals (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referee_id INTEGER, status TEXT DEFAULT 'Started (Unverified)')''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS withdraws (
@@ -44,11 +48,7 @@ def get_main_keyboard():
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    username = message.from_user.username or f"User_{user_id}"
     text_split = message.text.split()
-    
-    # Sabse pehle purane saare fansi hue states ko flush karke khatam karo
-    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     
     conn = sqlite3.connect('bot_data.db')
     cursor = conn.cursor()
@@ -57,20 +57,11 @@ def start(message):
     
     if not user:
         referrer = int(text_split[1]) if (len(text_split) > 1 and text_split[1].isdigit()) else None
-        if referrer == user_id:
-            referrer = None
-
-        cursor.execute("INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)", (user_id, username, referrer))
+        cursor.execute("INSERT INTO users (user_id, referred_by) VALUES (?, ?)", (user_id, referrer))
         if referrer:
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
-    else:
-        # Agar user pehle se registered hai aur verified hai, toh seedha menu do
-        if user[4] == 1:
-            bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
-            conn.close()
-            return
-            
+    
     cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
     channels_str = cursor.fetchone()[0]
     channels = eval(channels_str) if channels_str else []
@@ -87,56 +78,55 @@ def start(message):
         ask_verification(message.chat.id)
 
 def ask_verification(chat_id):
-    # Unverified banday ke screen se normal keyboard clear kar do taaki kachra click na ho
-    hide_keyboard = types.ReplyKeyboardRemove()
+    # Telegram Mini App dynamic URL configuration
+    web_app_url = f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}"
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(text="🛡️ Click Here to Verify", callback_data="trigger_captcha"))
-    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup, reply_to_message_id=None)
+    # WebAppInfo use karne se yeh direct Telegram ke andar screen kholega
+    markup.add(types.InlineKeyboardButton(text="🛡️ Verify", web_app=types.WebAppInfo(url=web_app_url)))
+    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup)
 
-# --- CAPTCHA VALIDATION SYSTEM ---
-def verify_captcha_answer(message, correct_ans):
+# --- WEB APP RECEPTION ENDPOINT ---
+@bot.message_handler(content_types=['web_app_data'])
+def handle_web_app_data(message):
     user_id = message.from_user.id
-    text = message.text
-    
-    if text and text.startswith('/start'):
-        start(message)
-        return
-
     try:
-        user_ans = int(text)
-        if user_ans == correct_ans:
-            conn = sqlite3.connect('bot_data.db')
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
-            
-            cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
-            ref_by = cursor.fetchone()[0]
-            
-            if ref_by:
-                cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
-                per_invite, current_fund = cursor.fetchone()
-                if current_fund >= per_invite:
-                    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (per_invite, ref_by))
-                    cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
-                    cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
-                    try:
-                        bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` ne verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
-                    except:
-                        pass
-            
-            conn.commit()
+        data = json.loads(message.web_app_data.data)
+        device_ip = data.get("ip", f"USER_{user_id}")
+        
+        conn = sqlite3.connect('bot_data.db')
+        cursor = conn.cursor()
+        
+        # Same Device Detection Engine
+        cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (device_ip, user_id))
+        duplicate = cursor.fetchone()
+        
+        if duplicate:
+            bot.send_message(message.chat.id, "❌ *Verification Failed!*\n\nSame device detected! Ek hi device se multiple referrals banana allow nahi hai.", parse_mode='Markdown')
             conn.close()
+            return
             
-            # CRITICAL FIX: Sahi answer par get_main_keyboard bhej rahe hain jisse buttons open honge!
-            bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
-        else:
-            num1 = random.randint(1, 9)
-            num2 = random.randint(1, 9)
-            msg = bot.send_message(message.chat.id, f"❌ *Wrong Answer!* Try again carefully:\n👉 *{num1} + {num2} = ?*", parse_mode='Markdown')
-            bot.register_next_step_handler(msg, verify_captcha_answer, (num1+num2))
-    except (ValueError, TypeError):
-        msg = bot.send_message(message.chat.id, "🔢 Please enter a numeric answer only:")
-        bot.register_next_step_handler(msg, verify_captcha_answer, correct_ans)
+        # Clear/Mark verification true
+        cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (device_ip, user_id))
+        
+        # Credit Reward Assets automatically
+        cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
+        ref_by = cursor.fetchone()[0]
+        
+        if ref_by:
+            cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
+            per_invite, current_fund = cursor.fetchone()
+            if current_fund >= per_invite:
+                cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (per_invite, ref_by))
+                cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
+                cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
+                bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` ne verification complete kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
+                
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, "✅ *Verification Successful!* Ab aap bot ke saare features use kar sakte hain.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ System Error: {str(e)}")
 
 # --- TEXT BUTTONS HANDLING ---
 @bot.message_handler(func=lambda msg: True)
@@ -150,9 +140,8 @@ def handle_menu_click(message):
     user_status = cursor.fetchone()
     
     if not user_status or user_status[0] == 0:
+        bot.send_message(message.chat.id, "❌ Please complete your web verification first!")
         conn.close()
-        bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
-        ask_verification(message.chat.id)
         return
 
     balance = user_status[1]
@@ -210,9 +199,6 @@ def handle_menu_click(message):
 
 # --- WITHDRAW FLOW ---
 def process_withdraw_amount(message, balance):
-    if message.text and message.text.startswith('/start'):
-        start(message)
-        return
     try:
         amount = float(message.text)
         if amount > balance or amount <= 0:
@@ -224,9 +210,6 @@ def process_withdraw_amount(message, balance):
         bot.send_message(message.chat.id, "❌ Please enter valid digits.")
 
 def process_withdraw_upi(message, amount):
-    if message.text and message.text.startswith('/start'):
-        start(message)
-        return
     user_id = message.from_user.id
     upi_id = message.text
     
@@ -318,9 +301,6 @@ def handle_callbacks(call):
 
 # --- LUDO GAME CALCULATION ---
 def process_ludo_bet(message, choice):
-    if message.text and message.text.startswith('/start'):
-        start(message)
-        return
     user_id = message.from_user.id
     try:
         bet_amount = float(message.text)
@@ -341,11 +321,11 @@ def process_ludo_bet(message, choice):
         if choice == result_bucket:
             cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet_amount, user_id))
             cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (bet_amount,))
-            bot.send_message(message.chat.id, f"🥳 *Whohoo! You Won!*\n₹{bet_amount * 2} credited successfully (Double mapping!).", parse_mode='Markdown', reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, f"🥳 *Whohoo! You Won!*\n₹{bet_amount * 2} credited successfully (Double mapping!).", parse_mode='Markdown')
         else:
             cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (bet_amount, user_id))
             cursor.execute("UPDATE settings SET bot_fund = bot_fund + ? WHERE id = 1", (bet_amount,))
-            bot.send_message(message.chat.id, f"😭 *You Lost the Bet!*\n₹{bet_amount} cut down from wallet balances.", parse_mode='Markdown', reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, f"😭 *You Lost the Bet!*\n₹{bet_amount} cut down from wallet balances.", parse_mode='Markdown')
             
         conn.commit()
         conn.close()
