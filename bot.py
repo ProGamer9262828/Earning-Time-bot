@@ -14,13 +14,13 @@ RAILWAY_DOMAIN = "https://earning-time-bot-production.up.railway.app"
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
-
-# --- SAFE DATABASE UTILITIES ---
 DB_FILE = 'bot_data.db'
 
+# --- SAFE DATABASE UTILITIES WITH LOCK PROTECTION ---
 def get_db_connection():
     # check_same_thread=False allows multi-threaded Flask/Telebot processing safely
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=10)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
+    conn.execute('PRAGMA journal_mode=WAL;')  # High performance concurrent read/writes
     return conn
 
 def init_db():
@@ -44,40 +44,76 @@ def init_db():
 
 init_db()
 
-# --- WEB SERVER UI ROUTING ---
+# --- HARDENED WEBAPP ENGINE (ADVANCED HARDWARE ANTI-CHEAT) ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profit Time Verification</title>
+    <title>Device Authenticator Engine</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { background-color: #0b0e14; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .container { background-color: #151a24; border-radius: 24px; padding: 40px 20px; text-align: center; width: 85%; max-width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
-        .icon-circle { width: 100px; height: 100px; border-radius: 50%; border: 3px solid #00e676; display: flex; justify-content: center; align-items: center; margin: 0 auto 30px auto; background: rgba(0, 230, 118, 0.1); }
-        .icon-circle::after { content: "✓"; font-size: 50px; color: #00e676; font-weight: bold; }
-        h2 { color: #00e676; font-size: 26px; margin-bottom: 10px; }
-        p { color: #90a4ae; font-size: 15px; line-height: 1.5; margin-bottom: 40px; }
-        .btn { background-color: #00e676; color: #0b0e14; border: none; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; cursor: pointer; text-transform: uppercase; box-shadow: 0 5px 15px rgba(0, 230, 118, 0.3); }
+        body { background-color: #0b0e14; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background-color: #151a24; border-radius: 24px; padding: 40px 20px; text-align: center; width: 85%; max-width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #1f293d; }
+        .icon-circle { width: 90px; height: 90px; border-radius: 50%; border: 3px solid #00e676; display: flex; justify-content: center; align-items: center; margin: 0 auto 25px auto; background: rgba(0, 230, 118, 0.1); animation: pulse 2s infinite; }
+        .icon-circle::after { content: "✓"; font-size: 45px; color: #00e676; font-weight: bold; }
+        h2 { color: #00e676; font-size: 24px; margin-bottom: 8px; font-weight: 700; }
+        p { color: #90a4ae; font-size: 14px; line-height: 1.6; margin-bottom: 35px; }
+        .btn { background: linear-gradient(135deg, #00e676 0%, #00b0ff 100%); color: #0b0e14; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: bold; width: 100%; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 5px 20px rgba(0, 230, 118, 0.4); transition: transform 0.2s; }
+        .btn:active { transform: scale(0.98); }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.4); } 70% { box-shadow: 0 0 0 15px rgba(0, 230, 118, 0); } 100% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); } }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="icon-circle"></div>
-        <h2>Verified Successfully</h2>
-        <p>You're verified successfully, you can use our bot now.</p>
-        <button class="btn" onclick="sendDataToBot()">Continue to Bot</button>
+        <h2>Device Checked Successfully</h2>
+        <p>Your hardware profile has been verified. You can now unlock the automated dashboard systems safely.</p>
+        <button class="btn" onclick="secureSubmit()">Complete Onboarding</button>
     </div>
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
+        tg.ready();
         
-        function sendDataToBot() {
-            const fingerprint = btoa(navigator.userAgent).substring(0, 20) + "_" + screen.width + "x" + screen.height;
-            const payload = { status: "VERIFIED_OK", device: fingerprint };
-            tg.sendData(JSON.stringify(payload));
+        function getHardwareFingerprint() {
+            // Complex multi-layered hardware string generation
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            let debugInfo = "";
+            if (gl) {
+                const ext = gl.getExtension('WEBGL_debug_renderer_info');
+                debugInfo = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "";
+            }
+            
+            // Core unique components combinations
+            const hardwareProfile = [
+                navigator.hardwareConcurrency || 4,
+                screen.colorDepth,
+                screen.availWidth + "x" + screen.availHeight,
+                new Date().getTimezoneOffset(),
+                navigator.cookieEnabled,
+                debugInfo,
+                navigator.deviceMemory || "N/A"
+            ].join("||");
+            
+            // Convert to secure pseudo-hash string
+            return btoa(unescape(encodeURIComponent(hardwareProfile))).substring(0, 40);
+        }
+        
+        function secureSubmit() {
+            const dynamicToken = getHardwareFingerprint();
+            const initRaw = tg.initDataUnsafe;
+            
+            const clientPayload = {
+                status: "VERIFIED_OK",
+                hw_token: dynamicToken,
+                tg_user_id: initRaw.user ? initRaw.user.id : null
+            };
+            
+            // Push real-time event back through Telegram socket pipeline
+            tg.sendData(JSON.stringify(clientPayload));
             tg.close();
         }
     </script>
@@ -91,9 +127,9 @@ def verify_page():
 
 @app.route('/')
 def home():
-    return "Bot Server is Live!"
+    return "Bot Core Service Active"
 
-# --- KEYBOARDS ---
+# --- SYSTEM KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -107,7 +143,7 @@ def get_verify_keyboard(chat_id):
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
     return markup
 
-# --- START COMMAND ---
+# --- START COMMAND ROUTER ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -124,24 +160,23 @@ def start(message):
     if not user:
         referrer = int(text_split[1]) if (len(text_split) > 1 and text_split[1].isdigit()) else None
         if referrer == user_id: referrer = None
+        
         cursor.execute("INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)", (user_id, username, referrer))
         if referrer:
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
     else:
-        if user[5] == 1: 
+        if user[5] == 1:  # check if is_verified == 1
             bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
             conn.close()
             return
             
     cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
     channels_str = cursor.fetchone()[0]
-    
     try:
         channels = json.loads(channels_str) if channels_str else []
     except:
         channels = []
-        
     conn.close()
     
     if channels:
@@ -153,29 +188,45 @@ def start(message):
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-# --- WEB APP REAL-TIME RESPONSE ---
+# --- WEB APP REAL-TIME RESPONSE INTERCEPTOR ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
     try:
         data = json.loads(message.web_app_data.data)
         if data.get("status") == "VERIFIED_OK":
-            device_token = data.get("device", f"DEV_{user_id}")
+            hw_token = data.get("hw_token")
             
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (device_token, user_id))
-            duplicate = cursor.fetchone()
+            # CRITICAL: Find if this hardware profile token exists on another user account
+            cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (hw_token, user_id))
+            duplicate_device = cursor.fetchone()
             
-            if duplicate:
-                bot.send_message(message.chat.id, "❌ *Same Device Detected!*\n\nEk hi phone se multiple accounts verify karna allowed nahi hai.", parse_mode='Markdown')
-                conn.close()
-                return
-            
-            cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (device_token, user_id))
+            # Check referral tracking links
             cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
             ref_by = cursor.fetchone()[0]
+            
+            if duplicate_device:
+                # CRITICAL CORE LOGIC MATCH:
+                # This device has already been bound to another account.
+                # The current user can use the bot, but the person who referred them gets NO CREDIT.
+                cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
+                if ref_by:
+                    cursor.execute("UPDATE referrals SET status = 'Failed: Same Device Flag' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
+                    try:
+                        bot.send_message(ref_by, f"⚠️ *Referral Multi-Account Alert!*\n\nUser `{user_id}` has joined your link using an existing device asset. No referral credit issued.", parse_mode='Markdown')
+                    except: pass
+                
+                conn.commit()
+                conn.close()
+                
+                bot.send_message(message.chat.id, "⚠️ *Verification Alert !!*\n\nYour hardware signature matches another system asset. Access granted to bot functions but referral tracking is invalidated.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+                return
+            
+            # Fresh new device setup path
+            cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (hw_token, user_id))
             
             if ref_by:
                 cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
@@ -185,16 +236,16 @@ def handle_web_app_data(message):
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try:
-                        bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` ne verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
+                        bot.send_message(ref_by, f"🔔 *New Successful Referral!*\nUser ID `{user_id}` has completed unique verification. ₹{per_invite} added to wallet!", parse_mode='Markdown')
                     except: pass
             
             conn.commit()
             conn.close()
             bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
+        bot.send_message(message.chat.id, f"❌ Engine Processing Fault: {str(e)}")
 
-# --- TEXT MENU CLICK SYSTEM ---
+# --- TEXT MENU HANDLING ARCHITECTURE ---
 @bot.message_handler(func=lambda msg: True)
 def handle_menu_click(message):
     user_id = message.from_user.id
@@ -251,12 +302,12 @@ def process_withdraw_amount(message, balance):
     try:
         amount = float(message.text)
         if amount > balance or amount <= 0: 
-            bot.send_message(message.chat.id, "❌ Invalid amount. Transaction cancelled.")
+            bot.send_message(message.chat.id, "❌ Invalid amount threshold setup. Request terminated.")
             return
         msg = bot.send_message(message.chat.id, "Now type your valid *UPI ID*:")
         bot.register_next_step_handler(msg, process_withdraw_upi, amount)
     except ValueError: 
-        bot.send_message(message.chat.id, "❌ Please enter numbers only.")
+        bot.send_message(message.chat.id, "❌ Numerical float point error. Please input integers only.")
 
 def process_withdraw_upi(message, amount):
     user_id = message.from_user.id
@@ -268,7 +319,7 @@ def process_withdraw_upi(message, amount):
     current_balance = cursor.fetchone()[0]
     
     if amount > current_balance:
-        bot.send_message(message.chat.id, "❌ Insufficient funds.")
+        bot.send_message(message.chat.id, "❌ Balance conflict: Double transaction processing blocked.")
         conn.close()
         return
 
@@ -282,7 +333,7 @@ def process_withdraw_upi(message, amount):
         bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`", parse_mode='Markdown')
     except: pass
 
-# --- CALLBACK ROUTINGS ---
+# --- CALLBACK INTERACTORS ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -295,11 +346,10 @@ def handle_callbacks(call):
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
         
-        # Implement 24-hour daily cooldown to prevent spamming the button
         cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
         last_time_str = cursor.fetchone()[0]
-        
         now = datetime.now()
+        
         if last_time_str:
             last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
             if now - last_time < timedelta(days=1):
@@ -373,7 +423,6 @@ def process_ludo_bet(message, choice):
 # --- DUAL WEB ENGINE LAUNCHER ---
 if __name__ == '__main__':
     import threading
-    # Enabled threading configuration inside Telebot launcher to match daemon properties
     threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
