@@ -10,7 +10,6 @@ from flask import Flask, request, render_template_string
 # --- CONFIGURATION ---
 BOT_TOKEN = "8473027179:AAF-9rouF_79QAZRNLIeDnHNgg3-VPeq1RQ"
 ADMIN_ID = 8031127296
-# Aapka dynamic railway link
 RAILWAY_DOMAIN = "https://earning-time-bot-production.up.railway.app" 
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -25,7 +24,7 @@ def init_db():
                         bot_fund REAL, earn_more_link TEXT, mandatory_channels TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY, username TEXT, balance REAL DEFAULT 0.0, 
-                        referred_by INTEGER, is_verified INTEGER DEFAULT 0, last_bonus_time TEXT)''')
+                        referred_by INTEGER, device_token TEXT, is_verified INTEGER DEFAULT 0, last_bonus_time TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS referrals (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referee_id INTEGER, status TEXT DEFAULT 'Started (Unverified)')''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS withdraws (
@@ -38,7 +37,7 @@ def init_db():
 
 init_db()
 
-# --- WEB SERVER UI ROUTING (SCREENSHOT FIX) ---
+# --- WEB SERVER UI ROUTING (100% FIXED DATA PASS) ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -67,10 +66,13 @@ HTML_TEMPLATE = """
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
+        
         function sendDataToBot() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const userId = urlParams.get('user_id') || "unknown";
-            const payload = { user_id: userId, status: "VERIFIED_OK" };
+            // Browser signature fingerprint simulation for Auto-Detection
+            const fingerprint = navigator.userAgent + "_" + screen.width + "x" + screen.height;
+            const payload = { status: "VERIFIED_OK", device: fingerprint };
+            
+            // Fixed connection trigger
             tg.sendData(JSON.stringify(payload));
             tg.close();
         }
@@ -85,7 +87,7 @@ def verify_page():
 
 @app.route('/')
 def home():
-    return "Bot Server is Live and Running perfectly!"
+    return "Bot Server is Live!"
 
 # --- KEYBOARDS ---
 def get_main_keyboard():
@@ -93,6 +95,13 @@ def get_main_keyboard():
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
     markup.add(types.KeyboardButton('👥 Refer & Earn'), types.KeyboardButton('💸 Withdraw'))
     markup.add(types.KeyboardButton('🎰 Bet & Earn'), types.KeyboardButton('🚀 Earn More'))
+    return markup
+
+def get_verify_keyboard(chat_id):
+    # CRITICAL FIX: Keyboard Button use kar rahe hain takki tg.sendData() response pass kar sake!
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    web_app_url = f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}"
+    markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
     return markup
 
 # --- START COMMAND ---
@@ -117,7 +126,7 @@ def start(message):
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
     else:
-        if user[4] == 1:
+        if user[5] == 1: # is_verified check
             bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
             conn.close()
             return
@@ -134,24 +143,31 @@ def start(message):
         markup.add(types.InlineKeyboardButton(text="✔️ Claim", callback_data="check_channels"))
         bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click Claim*", parse_mode='Markdown', reply_markup=markup)
     else:
-        ask_verification(message.chat.id)
+        bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-def ask_verification(chat_id):
-    web_app_url = f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(text="🛡️ Verify", web_app=types.WebAppInfo(url=web_app_url)))
-    bot.send_message(chat_id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=markup)
-
-# --- WEB APP RECEPTION ---
+# --- WEB APP REAL-TIME RESPONSE ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
     try:
         data = json.loads(message.web_app_data.data)
         if data.get("status") == "VERIFIED_OK":
+            device_token = data.get("device", f"DEV_{user_id}")
+            
             conn = sqlite3.connect('bot_data.db')
             cursor = conn.cursor()
-            cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
+            
+            # 🔥 AUTO DETECT SAME DEVICE ANTI-CHEAT
+            cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (device_token, user_id))
+            duplicate = cursor.fetchone()
+            
+            if duplicate:
+                bot.send_message(message.chat.id, "❌ *Same Device Detected!*\n\nEk hi phone se multiple accounts verify karna allowed nahi hai. Verification failed!", parse_mode='Markdown')
+                conn.close()
+                return
+            
+            # Mark Verification true & save phone fingerprint token
+            cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (device_token, user_id))
             
             cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
             ref_by = cursor.fetchone()[0]
@@ -169,6 +185,8 @@ def handle_web_app_data(message):
             
             conn.commit()
             conn.close()
+            
+            # Instant home menu pop-up setup
             bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nYou can use our bot now.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
@@ -186,7 +204,7 @@ def handle_menu_click(message):
     
     if not user_status or user_status[0] == 0:
         conn.close()
-        ask_verification(message.chat.id)
+        bot.send_message(message.chat.id, "🛡️ *Please complete your verification first:*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
         return
 
     balance = user_status[1]
@@ -256,7 +274,7 @@ def handle_callbacks(call):
     
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
-        ask_verification(call.message.chat.id)
+        bot.send_message(call.message.chat.id, "🛡 *Verify Yourself To Start Bot*", reply_markup=get_verify_keyboard(call.message.chat.id))
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
         dice_roll = random.randint(1, 6)
@@ -312,8 +330,6 @@ def process_ludo_bet(message, choice):
 # --- DUAL WEB ENGINE LAUNCHER ---
 if __name__ == '__main__':
     import threading
-    # Telegram Bot Polling background thread me chalega
     threading.Thread(target=bot.infinity_polling, daemon=True).start()
-    # Main port thread Flask receive karega port 8080 par jisse error hat jayega
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
