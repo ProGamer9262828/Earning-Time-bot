@@ -16,9 +16,9 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 DB_FILE = 'bot_data.db'
 
-# --- DB CONNECTION ---
+# --- DB CONNECTION WITH HIGHSPEED LOCKS ---
 def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
@@ -191,7 +191,7 @@ def check_device():
 def home():
     return "Bot Core Service Active"
 
-# --- KEYBOARDS ---
+# --- SYSTEM KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -205,17 +205,22 @@ def get_verify_keyboard(chat_id):
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
     return markup
 
-# --- START ROUTER ---
+# --- START ROUTER WITH STATE BYPASS LOCK ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or f"User_{user_id}"
     text_split = message.text.split()
-    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+    
+    # Session cleanup to avoid thread collisions
+    try:
+        bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+    except:
+        pass
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT is_verified FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     
     if not user:
@@ -225,11 +230,14 @@ def start(message):
         if referrer:
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
+        is_verified = 0
     else:
-        if user[5] == 1: 
-            bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
-            conn.close()
-            return
+        is_verified = user[0]
+        
+    if is_verified == 1: 
+        conn.close()
+        bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
+        return
             
     cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
     channels_str = cursor.fetchone()[0]
@@ -248,7 +256,7 @@ def start(message):
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-# --- DATA RECEIVER (TEXT UPDATED HERE) ---
+# --- PLATFORM TELEMETRY PIPELINE ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
@@ -272,7 +280,6 @@ def handle_web_app_data(message):
             
             conn.commit()
             conn.close()
-            # UPDATED USER MESSAGE TEXT FOR CLEAR FLOW
             bot.send_message(message.chat.id, "⚠️ *Same Device Detected!*\n\nAapka device pehle se use ho chuka hai. Aap bot use kar sakte hain par jiske link se aapne join kiya hai, unka referral count nahi hoga.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
             return
             
@@ -294,7 +301,7 @@ def handle_web_app_data(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Engine Fault: {str(e)}")
 
-# --- INLINE CALLBACKS ---
+# --- INLINE CALL ROUTER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -343,11 +350,16 @@ def handle_callbacks(call):
         bot.register_next_step_handler(msg, process_ludo_bet, choice)
     conn.close()
 
-# --- TEXT CONTROLLER ---
+# --- HANDLER WITH STRICT VERIFICATION CHECK ---
 @bot.message_handler(func=lambda msg: True)
 def handle_menu_click(message):
     user_id = message.from_user.id
     text = message.text
+    
+    # Ignore standalone text /start commands here to avoid thread loop cascades
+    if text.startswith('/start'):
+        return
+        
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
