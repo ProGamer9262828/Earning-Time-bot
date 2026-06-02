@@ -37,6 +37,7 @@ def init_db():
                         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, upi_id TEXT, status TEXT DEFAULT 'Pending')''')
     cursor.execute("SELECT COUNT(*) FROM settings")
     if cursor.fetchone()[0] == 0:
+        # Default testing panel configurations
         cursor.execute("INSERT INTO settings VALUES (1, 5.0, 20.0, 100000.0, 'https://t.me/your_channel', '[]')")
     conn.commit()
     conn.close()
@@ -59,7 +60,7 @@ HTML_TEMPLATE = """
         /* Loading Spinner */
         .spinner { width: 80px; height: 80px; border: 4px solid rgba(255, 255, 255, 0.1); border-top: 4px solid #00b0ff; border-radius: 50%; margin: 0 auto 30px auto; animation: spin 1s linear infinite; }
         
-        /* Status Icons (Hidden during scan) */
+        /* Status Icons */
         .icon-box { width: 90px; height: 90px; border-radius: 50%; display: none; justify-content: center; align-items: center; margin: 0 auto 25px auto; transform: scale(0.5); animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
         .success-icon { border: 3px solid #00e676; background: rgba(0, 230, 118, 0.1); box-shadow: 0 0 20px rgba(0, 230, 118, 0.2); }
         .success-icon::after { content: "✓"; font-size: 45px; color: #00e676; font-weight: bold; }
@@ -91,7 +92,6 @@ HTML_TEMPLATE = """
         tg.expand();
         tg.ready();
 
-        // 1. Generate deep canvas webgl and hardware parameter profile
         function getHardwareFingerprint() {
             const canvas = document.createElement('canvas');
             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -114,7 +114,7 @@ HTML_TEMPLATE = """
         const hwToken = getHardwareFingerprint();
         const tgUserId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
         
-        // 2. Multi-stage loading simulation (Total 4 seconds)
+        // Dynamic live scanning pipeline (Total 4 seconds UI lag check)
         setTimeout(() => {
             document.getElementById('mainHeading').innerText = "Analyzing Hardware Profile...";
             document.getElementById('subText').innerText = "Extracting device GPU core rendering signatures and systemic token maps...";
@@ -124,7 +124,6 @@ HTML_TEMPLATE = """
             document.getElementById('mainHeading').innerText = "Checking Fraud Database...";
             document.getElementById('subText').innerText = "Cross-referencing telemetry structures against existing device mappings...";
             
-            // Call API backend directly to pre-verify duplication before loader ends
             fetch(`/api/check_device?hw_token=${hwToken}&user_id=${tgUserId}`)
                 .then(res => res.json())
                 .then(data => {
@@ -135,16 +134,14 @@ HTML_TEMPLATE = """
                         iconEl.style.display = "flex";
 
                         if(data.is_duplicate) {
-                            // SAME DEVICE FOUND SYSTEM STATE
                             iconEl.classList.add('danger-icon');
                             document.getElementById('mainHeading').innerText = "Same Device Detected!";
                             document.getElementById('mainHeading').style.color = "#ff1744";
-                            document.getElementById('subText').innerText = "This smartphone is already linked to another account. You can use the bot, but referral credits are disabled.";
+                            document.getElementById('subText').innerText = "This smartphone is already linked to another account. Access allowed but referral rewards disabled.";
                             btnEl.innerText = "Continue to Bot";
                             btnEl.className = "btn active-danger";
                             btnEl.setAttribute('data-status', 'VERIFIED_SAME_DEVICE');
                         } else {
-                            // FRESH INDEPENDENT DEVICE STATE
                             iconEl.classList.add('success-icon');
                             document.getElementById('mainHeading').innerText = "Device Checked Successfully";
                             document.getElementById('mainHeading').style.color = "#00e676";
@@ -155,7 +152,6 @@ HTML_TEMPLATE = """
                         }
                     }, 1200);
                 }).catch(() => {
-                    // Fallback configuration if request interrupts
                     document.getElementById('loader').style.display = "none";
                     document.getElementById('statusIcon').style.display = "flex";
                     document.getElementById('statusIcon').classList.add('success-icon');
@@ -184,13 +180,13 @@ HTML_TEMPLATE = """
 def verify_page():
     return render_template_string(HTML_TEMPLATE)
 
-# --- INTERNAL WEBAPP TELEMETRY ROUTE ---
+# --- INTERNAL WEBAPP ENGINE API ENDPOINT ---
 @app.route('/api/check_device')
 def check_device():
     hw_token = request.args.get('hw_token', '')
     user_id = request.args.get('user_id', '')
     
-    if not hw_token or not user_id:
+    if not hw_token or not user_id or user_id == "null" or user_id == "None":
         return {"is_duplicate": False}
         
     conn = get_db_connection()
@@ -282,21 +278,20 @@ def handle_web_app_data(message):
         ref_by = cursor.fetchone()[0]
         
         if incoming_status == "VERIFIED_SAME_DEVICE":
-            # Target User can use the bot, but Referrer gets absolutely no balance credit!
+            # Target user gets verified status to use bot normally, but Referrer gets NO CREDIT
             cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
             if ref_by:
                 cursor.execute("UPDATE referrals SET status = 'Failed: Same Device Flag' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                 try:
-                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device)!*\n\nUser `{user_id}` ne join kiya par hardware profile match hone ki wajah se credit skip kar diya gaya.", parse_mode='Markdown')
+                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device)!*\n\nUser `{user_id}` ne join kiya par hardware profile match hone ki wajah se referral credit cancel kar diya gaya.", parse_mode='Markdown')
                 except: pass
             
             conn.commit()
             conn.close()
-            bot.send_message(message.chat.id, "⚠️ *Verification Clear! (Same Device)*\n\nAapka account activate ho gaya hai, par duplicate hardware match hone ki wajah se referral tracking invalidate kar di gayi hai.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            bot.send_message(message.chat.id, "⚠️ *Verification Clear! (Same Device)*\n\nAapka account activate ho gaya hai, par duplicate hardware match hone ki wajah se referral tracking disable kar di gayi hai.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
             return
             
         if incoming_status == "VERIFIED_OK":
-            # Genuine uniquely checked asset flow
             cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (hw_token, user_id))
             
             if ref_by:
@@ -307,7 +302,7 @@ def handle_web_app_data(message):
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try:
-                        bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` ne verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
+                        bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` ne unique verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
                     except: pass
             
             conn.commit()
@@ -316,7 +311,62 @@ def handle_web_app_data(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Engine Processing Fault: {str(e)}")
 
-# --- TEXT MENU HANDLING ARCHITECTURE ---
+# --- CALLBACK INTERACTORS (FIXED CHANNEL VALIDATION LOOP) ---
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
+    user_id = call.from_user.id
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if call.data == "check_channels":
+        bot.answer_callback_query(call.id)
+        # Fix the loop: Once the user clicks "Claim", dynamically trigger the real device verification markup
+        bot.send_message(call.message.chat.id, "🛡️ *Channels checked! Now complete your device security scan:*", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
+    elif call.data == "daily_bonus":
+        bot.answer_callback_query(call.id)
+        
+        cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
+        last_time_str = cursor.fetchone()[0]
+        now = datetime.now()
+        
+        if last_time_str:
+            last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
+            if now - last_time < timedelta(days=1):
+                rem_time = timedelta(days=1) - (now - last_time)
+                hours, remainder = divmod(rem_time.seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                bot.send_message(call.message.chat.id, f"⏳ *Daily Bonus claimed!* Please wait `{hours}h {minutes}m` to spin again.", parse_mode="Markdown")
+                conn.close()
+                return
+                
+        dice_roll = random.randint(1, 6)
+        cursor.execute("UPDATE users SET balance = balance + ?, last_bonus_time = ? WHERE user_id = ?", (dice_roll, now.strftime('%Y-%m-%d %H:%M:%S'), user_id))
+        conn.commit()
+        bot.send_message(call.message.chat.id, f"🎲 *Dice Rolled!* You got ₹{dice_roll}!")
+        
+    elif call.data == "view_bot_fund":
+        bot.answer_callback_query(call.id)
+        cursor.execute("SELECT bot_fund FROM settings WHERE id = 1")
+        bot.send_message(call.message.chat.id, f"🟢 *Remaining Fund >>* ₹{cursor.fetchone()[0]:.2f}")
+    elif call.data == "w_history":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "📝 No recent records.")
+    elif call.data == "my_invites":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "🚀 Use Tracker to see analytics.")
+    elif call.data == "game_ludo":
+        bot.answer_callback_query(call.id)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔴 Big", callback_data="ludo_big"), types.InlineKeyboardButton("🔵 Small", callback_data="ludo_small"))
+        bot.send_message(call.message.chat.id, "🎲 Select Bucket:", reply_markup=markup)
+    elif call.data in ["ludo_big", "ludo_small"]:
+        bot.answer_callback_query(call.id)
+        choice = "BIG" if call.data == "ludo_big" else "SMALL"
+        msg = bot.send_message(call.message.chat.id, f"💬 Enter amount to bet on {choice}:")
+        bot.register_next_step_handler(msg, process_ludo_bet, choice)
+    conn.close()
+
+# --- MENU TEXT INTERACTION PLATFORM ---
 @bot.message_handler(func=lambda msg: True)
 def handle_menu_click(message):
     user_id = message.from_user.id
@@ -329,7 +379,7 @@ def handle_menu_click(message):
     
     if not user_status or user_status[0] == 0:
         conn.close()
-        bot.send_message(message.chat.id, "🛡️ *Please complete your verification first:*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
+        bot.send_message(message.chat.id, "🛡️ *Please complete your verification first:*", parse_mode='Markdown', reply_verify=get_verify_keyboard(message.chat.id))
         return
 
     balance = user_status[1]
@@ -404,60 +454,6 @@ def process_withdraw_upi(message, amount):
         bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`", parse_mode='Markdown')
     except: pass
 
-# --- CALLBACK INTERACTORS ---
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callbacks(call):
-    user_id = call.from_user.id
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    if call.data == "check_channels":
-        bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, "🛡 *Verify Yourself To Start Bot*", reply_markup=get_verify_keyboard(call.message.chat.id))
-    elif call.data == "daily_bonus":
-        bot.answer_callback_query(call.id)
-        
-        cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
-        last_time_str = cursor.fetchone()[0]
-        now = datetime.now()
-        
-        if last_time_str:
-            last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
-            if now - last_time < timedelta(days=1):
-                rem_time = timedelta(days=1) - (now - last_time)
-                hours, remainder = divmod(rem_time.seconds, 3600)
-                minutes, _ = divmod(remainder, 60)
-                bot.send_message(call.message.chat.id, f"⏳ *Daily Bonus claimed!* Please wait `{hours}h {minutes}m` to spin again.", parse_mode="Markdown")
-                conn.close()
-                return
-                
-        dice_roll = random.randint(1, 6)
-        cursor.execute("UPDATE users SET balance = balance + ?, last_bonus_time = ? WHERE user_id = ?", (dice_roll, now.strftime('%Y-%m-%d %H:%M:%S'), user_id))
-        conn.commit()
-        bot.send_message(call.message.chat.id, f"🎲 *Dice Rolled!* You got ₹{dice_roll}!")
-        
-    elif call.data == "view_bot_fund":
-        bot.answer_callback_query(call.id)
-        cursor.execute("SELECT bot_fund FROM settings WHERE id = 1")
-        bot.send_message(call.message.chat.id, f"🟢 *Remaining Fund >>* ₹{cursor.fetchone()[0]:.2f}")
-    elif call.data == "w_history":
-        bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, "📝 No recent records.")
-    elif call.data == "my_invites":
-        bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, "🚀 Use Tracker to see analytics.")
-    elif call.data == "game_ludo":
-        bot.answer_callback_query(call.id)
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔴 Big", callback_data="ludo_big"), types.InlineKeyboardButton("🔵 Small", callback_data="ludo_small"))
-        bot.send_message(call.message.chat.id, "🎲 Select Bucket:", reply_markup=markup)
-    elif call.data in ["ludo_big", "ludo_small"]:
-        bot.answer_callback_query(call.id)
-        choice = "BIG" if call.data == "ludo_big" else "SMALL"
-        msg = bot.send_message(call.message.chat.id, f"💬 Enter amount to bet on {choice}:")
-        bot.register_next_step_handler(msg, process_ludo_bet, choice)
-    conn.close()
-
 def process_ludo_bet(message, choice):
     user_id = message.from_user.id
     try:
@@ -491,7 +487,7 @@ def process_ludo_bet(message, choice):
     except ValueError:
         bot.send_message(message.chat.id, "❌ Cancelled. Enter numerical values only.")
 
-# --- DUAL WEB ENGINE LAUNCHER ---
+# --- ENGINE SHUTTLE PLATFORM ---
 if __name__ == '__main__':
     import threading
     threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
