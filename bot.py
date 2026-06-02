@@ -43,7 +43,7 @@ def init_db():
 
 init_db()
 
-# --- FIXED DYNAMIC LOADING ANTI-CHEAT UI ---
+# --- ANTI-CHEAT WEBAPP ENGINE ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -55,24 +55,17 @@ HTML_TEMPLATE = """
     <style>
         body { background-color: #0b0e14; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
         .container { background-color: #151a24; border-radius: 24px; padding: 40px 20px; text-align: center; width: 85%; max-width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); border: 1px solid #1f293d; }
-        
-        /* Loader Spinner */
         .spinner { width: 80px; height: 80px; border: 4px solid rgba(255, 255, 255, 0.1); border-top: 4px solid #00b0ff; border-radius: 50%; margin: 0 auto 30px auto; animation: spin 1s linear infinite; }
-        
-        /* Status Icons */
         .icon-box { width: 90px; height: 90px; border-radius: 50%; display: none; justify-content: center; align-items: center; margin: 0 auto 25px auto; transform: scale(0.5); animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
         .success-icon { border: 3px solid #00e676; background: rgba(0, 230, 118, 0.1); box-shadow: 0 0 20px rgba(0, 230, 118, 0.2); }
         .success-icon::after { content: "✓"; font-size: 45px; color: #00e676; font-weight: bold; }
         .danger-icon { border: 3px solid #ff1744; background: rgba(255, 23, 68, 0.1); box-shadow: 0 0 20px rgba(255, 23, 68, 0.2); }
         .danger-icon::after { content: "✕"; font-size: 40px; color: #ff1744; font-weight: bold; }
-        
         h2 { color: #ffffff; font-size: 22px; margin-bottom: 12px; font-weight: 700; }
         p { color: #90a4ae; font-size: 14px; line-height: 1.6; margin-bottom: 35px; min-height: 45px; }
-        
         .btn { background: linear-gradient(135deg, #78909c 0%, #455a64 100%); color: #ffffff; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: bold; width: 100%; cursor: not-allowed; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; pointer-events: none; transition: all 0.3s ease; }
         .btn.active-success { background: linear-gradient(135deg, #00e676 0%, #00b0ff 100%); color: #0b0e14; cursor: pointer; opacity: 1; pointer-events: auto; box-shadow: 0 5px 20px rgba(0, 230, 118, 0.4); }
         .btn.active-danger { background: linear-gradient(135deg, #ff1744 0%, #ff9100 100%); color: #ffffff; cursor: pointer; opacity: 1; pointer-events: auto; box-shadow: 0 5px 20px rgba(255, 23, 68, 0.4); }
-        
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @keyframes popIn { 100% { transform: scale(1); } }
     </style>
@@ -91,7 +84,6 @@ HTML_TEMPLATE = """
         tg.expand();
         tg.ready();
 
-        // Get user_id safely from URL params instead of initDataUnsafe
         const urlParams = new URLSearchParams(window.location.search);
         const tgUserId = urlParams.get('user_id');
 
@@ -116,13 +108,11 @@ HTML_TEMPLATE = """
 
         const hwToken = getHardwareFingerprint();
         
-        // Stage 1 Loading Text Update (after 1.5 seconds)
         setTimeout(() => {
             document.getElementById('mainHeading').innerText = "Analyzing Telemetry...";
             document.getElementById('subText').innerText = "Checking device duplications and anti-bypass system registry...";
         }, 1500);
 
-        // Stage 2 Verification Finalizing (Total ~4 seconds loader)
         setTimeout(() => {
             fetch(`/api/check_device?hw_token=${hwToken}&user_id=${tgUserId}`)
                 .then(res => res.json())
@@ -133,7 +123,6 @@ HTML_TEMPLATE = """
                     iconEl.style.display = "flex";
 
                     if(data.is_duplicate) {
-                        // SAME DEVICE DETECTED FLOW
                         iconEl.classList.add('danger-icon');
                         document.getElementById('mainHeading').innerText = "Same Device Detected";
                         document.getElementById('mainHeading').style.color = "#ff1744";
@@ -142,7 +131,6 @@ HTML_TEMPLATE = """
                         btnEl.className = "btn active-danger";
                         btnEl.setAttribute('data-status', 'VERIFIED_SAME_DEVICE');
                     } else {
-                        // UNIQUE GENUINE DEVICE FLOW
                         iconEl.classList.add('success-icon');
                         document.getElementById('mainHeading').innerText = "Device Checked Successfully";
                         document.getElementById('mainHeading').style.color = "#00e676";
@@ -180,28 +168,21 @@ HTML_TEMPLATE = """
 def verify_page():
     return render_template_string(HTML_TEMPLATE)
 
-# --- FIXED API: HANDLES INTEGER PARSING SAFELY ---
 @app.route('/api/check_device')
 def check_device():
     hw_token = request.args.get('hw_token', '')
     user_id = request.args.get('user_id', '')
-    
     if not hw_token or not user_id or user_id in ["null", "None", ""]:
         return {"is_duplicate": False}
-        
     try:
         current_uid = int(user_id)
     except ValueError:
         return {"is_duplicate": False}
-        
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Check if this device token exists under ANY OTHER user id
     cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (hw_token, current_uid))
     duplicate = cursor.fetchone()
     conn.close()
-    
     if duplicate:
         return {"is_duplicate": True}
     return {"is_duplicate": False}
@@ -210,7 +191,7 @@ def check_device():
 def home():
     return "Bot Core Service Active"
 
-# --- SYSTEM KEYBOARDS ---
+# --- KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -224,13 +205,12 @@ def get_verify_keyboard(chat_id):
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
     return markup
 
-# --- START COMMAND ROUTER ---
+# --- START ROUTER ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or f"User_{user_id}"
     text_split = message.text.split()
-    
     bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     
     conn = get_db_connection()
@@ -241,7 +221,6 @@ def start(message):
     if not user:
         referrer = int(text_split[1]) if (len(text_split) > 1 and text_split[1].isdigit()) else None
         if referrer == user_id: referrer = None
-        
         cursor.execute("INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)", (user_id, username, referrer))
         if referrer:
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
@@ -269,7 +248,7 @@ def start(message):
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-# --- TELEMETRY RESPONSE ENGINE ---
+# --- DATA RECEIVER (TEXT UPDATED HERE) ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
@@ -280,7 +259,6 @@ def handle_web_app_data(message):
         
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
         ref_by = cursor.fetchone()[0]
         
@@ -289,17 +267,17 @@ def handle_web_app_data(message):
             if ref_by:
                 cursor.execute("UPDATE referrals SET status = 'Failed: Same Device Flag' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                 try:
-                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device)!*\n\nUser `{user_id}` ne click kiya par device duplicate mila, isliye bonus cancel.", parse_mode='Markdown')
+                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device)!*\n\nUser `{user_id}` ne click kiya par device duplicate mila, isliye referral point skip kar diya gaya.", parse_mode='Markdown')
                 except: pass
             
             conn.commit()
             conn.close()
-            bot.send_message(message.chat.id, "⚠️ *Same Device Detected!*\n\nAapka device pehle se use ho chuka hai. Aap bot use kar sakte hain par aapke referrer ko rewards nahi milenge.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            # UPDATED USER MESSAGE TEXT FOR CLEAR FLOW
+            bot.send_message(message.chat.id, "⚠️ *Same Device Detected!*\n\nAapka device pehle se use ho chuka hai. Aap bot use kar sakte hain par jiske link se aapne join kiya hai, unka referral count nahi hoga.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
             return
             
         if incoming_status == "VERIFIED_OK":
             cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (hw_token, user_id))
-            
             if ref_by:
                 cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
                 per_invite, current_fund = cursor.fetchone()
@@ -310,20 +288,18 @@ def handle_web_app_data(message):
                     try:
                         bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` verified uniquely. ₹{per_invite} added!", parse_mode='Markdown')
                     except: pass
-            
             conn.commit()
             conn.close()
             bot.send_message(message.chat.id, "✅ *Device Checked Successfully!*\n\nWelcome! Aap ab bot use kar sakte hain.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Engine Fault: {str(e)}")
 
-# --- INLINE CALLBACK CHECKER ---
+# --- INLINE CALLBACKS ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
         bot.send_message(call.message.chat.id, "🛡️ *Channels Checked! Now click below to open Real Hardware Scan:*", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
@@ -332,7 +308,6 @@ def handle_callbacks(call):
         cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
         last_time_str = cursor.fetchone()[0]
         now = datetime.now()
-        
         if last_time_str:
             last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
             if now - last_time < timedelta(days=1):
@@ -342,7 +317,6 @@ def handle_callbacks(call):
                 bot.send_message(call.message.chat.id, f"⏳ *Daily Bonus claimed!* Please wait `{hours}h {minutes}m` to spin again.", parse_mode="Markdown")
                 conn.close()
                 return
-                
         dice_roll = random.randint(1, 6)
         cursor.execute("UPDATE users SET balance = balance + ?, last_bonus_time = ? WHERE user_id = ?", (dice_roll, now.strftime('%Y-%m-%d %H:%M:%S'), user_id))
         conn.commit()
@@ -369,12 +343,11 @@ def handle_callbacks(call):
         bot.register_next_step_handler(msg, process_ludo_bet, choice)
     conn.close()
 
-# --- STANDALONE CONVERSATION TEXT CONTROLLER ---
+# --- TEXT CONTROLLER ---
 @bot.message_handler(func=lambda msg: True)
 def handle_menu_click(message):
     user_id = message.from_user.id
     text = message.text
-    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
@@ -436,22 +409,18 @@ def process_withdraw_amount(message, balance):
 def process_withdraw_upi(message, amount):
     user_id = message.from_user.id
     upi_id = message.text
-    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
     current_balance = cursor.fetchone()[0]
-    
     if amount > current_balance:
         bot.send_message(message.chat.id, "❌ Balance mismatch.")
         conn.close()
         return
-
     cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
     cursor.execute("INSERT INTO withdraws (user_id, amount, upi_id) VALUES (?, ?, ?)", (user_id, amount, upi_id))
     conn.commit()
     conn.close()
-    
     bot.send_message(message.chat.id, "✅ *Withdrawal Request Submitted!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     try:
         bot.send_message(ADMIN_ID, f"🔔 *New Withdrawal Alert!*\n\nUser ID: `{user_id}`\nAmount: ₹{amount}\nUPI ID: `{upi_id}`", parse_mode='Markdown')
@@ -464,33 +433,27 @@ def process_ludo_bet(message, choice):
         if bet_amount <= 0:
             bot.send_message(message.chat.id, "❌ Invalid Bet Amount.")
             return
-
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
         balance = cursor.fetchone()[0]
-        
         if bet_amount > balance:
             bot.send_message(message.chat.id, "❌ Low Balance.")
             conn.close()
             return
-            
         dice_out = random.randint(1, 6)
         res = "BIG" if dice_out in [4, 5, 6] else "SMALL"
-        
         if choice == res:
             cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet_amount, user_id))
             bot.send_message(message.chat.id, f"🎲 Result: {dice_out}. 🥳 *You Won! Balance Doubled!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
         else:
             cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (bet_amount, user_id))
             bot.send_message(message.chat.id, f"🎲 Result: {dice_out}. 😭 *You Lost!*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
-        
         conn.commit()
         conn.close()
     except ValueError:
         bot.send_message(message.chat.id, "❌ Cancelled. Enter numerical values only.")
 
-# --- PLATFORM RUNNER ---
 if __name__ == '__main__':
     import threading
     threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
