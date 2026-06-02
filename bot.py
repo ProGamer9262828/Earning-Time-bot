@@ -16,7 +16,7 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 DB_FILE = 'bot_data.db'
 
-# --- SAFE DATABASE UTILITIES ---
+# --- DB CONNECTION WITH WAL SPEED ENGINE ---
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
     conn.execute('PRAGMA journal_mode=WAL;')
@@ -37,7 +37,6 @@ def init_db():
                         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, upi_id TEXT, status TEXT DEFAULT 'Pending')''')
     cursor.execute("SELECT COUNT(*) FROM settings")
     if cursor.fetchone()[0] == 0:
-        # Default testing panel configurations
         cursor.execute("INSERT INTO settings VALUES (1, 5.0, 20.0, 100000.0, 'https://t.me/your_channel', '[]')")
     conn.commit()
     conn.close()
@@ -114,11 +113,11 @@ HTML_TEMPLATE = """
         const hwToken = getHardwareFingerprint();
         const tgUserId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
         
-        // Dynamic live scanning pipeline (Total 4 seconds UI lag check)
+        // Step-by-Step 3 to 5 Second Loader Logic
         setTimeout(() => {
             document.getElementById('mainHeading').innerText = "Analyzing Hardware Profile...";
             document.getElementById('subText').innerText = "Extracting device GPU core rendering signatures and systemic token maps...";
-        }, 1300);
+        }, 1200);
 
         setTimeout(() => {
             document.getElementById('mainHeading').innerText = "Checking Fraud Database...";
@@ -134,14 +133,16 @@ HTML_TEMPLATE = """
                         iconEl.style.display = "flex";
 
                         if(data.is_duplicate) {
+                            // CASE A: Duplicate / Same Device Detected
                             iconEl.classList.add('danger-icon');
                             document.getElementById('mainHeading').innerText = "Same Device Detected!";
                             document.getElementById('mainHeading').style.color = "#ff1744";
-                            document.getElementById('subText').innerText = "This smartphone is already linked to another account. Access allowed but referral rewards disabled.";
+                            document.getElementById('subText').innerText = "This device is already linked to an existing account. You can continue, but referral rewards are disabled.";
                             btnEl.innerText = "Continue to Bot";
                             btnEl.className = "btn active-danger";
                             btnEl.setAttribute('data-status', 'VERIFIED_SAME_DEVICE');
                         } else {
+                            // CASE B: Pure Unique Real Device Approved
                             iconEl.classList.add('success-icon');
                             document.getElementById('mainHeading').innerText = "Device Checked Successfully";
                             document.getElementById('mainHeading').style.color = "#00e676";
@@ -150,7 +151,7 @@ HTML_TEMPLATE = """
                             btnEl.className = "btn active-success";
                             btnEl.setAttribute('data-status', 'VERIFIED_OK');
                         }
-                    }, 1200);
+                    }, 1300);
                 }).catch(() => {
                     document.getElementById('loader').style.display = "none";
                     document.getElementById('statusIcon').style.display = "flex";
@@ -159,7 +160,7 @@ HTML_TEMPLATE = """
                     document.getElementById('actionBtn').className = "btn active-success";
                     document.getElementById('actionBtn').innerText = "Continue to Bot";
                 });
-        }, 2600);
+        }, 2500);
 
         function secureSubmit() {
             const btnEl = document.getElementById('actionBtn');
@@ -180,13 +181,13 @@ HTML_TEMPLATE = """
 def verify_page():
     return render_template_string(HTML_TEMPLATE)
 
-# --- INTERNAL WEBAPP ENGINE API ENDPOINT ---
+# --- BACKEND MULTI-ACCOUNT CHECK API ---
 @app.route('/api/check_device')
 def check_device():
     hw_token = request.args.get('hw_token', '')
     user_id = request.args.get('user_id', '')
     
-    if not hw_token or not user_id or user_id == "null" or user_id == "None":
+    if not hw_token or not user_id or user_id in ["null", "None", ""]:
         return {"is_duplicate": False}
         
     conn = get_db_connection()
@@ -203,7 +204,7 @@ def check_device():
 def home():
     return "Bot Core Service Active"
 
-# --- SYSTEM KEYBOARDS ---
+# --- KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -240,7 +241,7 @@ def start(message):
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
     else:
-        if user[5] == 1: 
+        if user[5] == 1: # is_verified checking
             bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
             conn.close()
             return
@@ -262,7 +263,7 @@ def start(message):
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-# --- WEB APP REAL-TIME RESPONSE INTERCEPTOR ---
+# --- WEB APP TELEMETRY PIPE RECEIVER ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
@@ -278,20 +279,21 @@ def handle_web_app_data(message):
         ref_by = cursor.fetchone()[0]
         
         if incoming_status == "VERIFIED_SAME_DEVICE":
-            # Target user gets verified status to use bot normally, but Referrer gets NO CREDIT
+            # Target fraud user gets access to features, but inviter gets NO WALLET CREDIT
             cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
             if ref_by:
                 cursor.execute("UPDATE referrals SET status = 'Failed: Same Device Flag' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                 try:
-                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device)!*\n\nUser `{user_id}` ne join kiya par hardware profile match hone ki wajah se referral credit cancel kar diya gaya.", parse_mode='Markdown')
+                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device Flag)!*\n\nUser `{user_id}` ne aapke link se join kiya par same device use karne ki wajah se credit stop kar diya gaya.", parse_mode='Markdown')
                 except: pass
             
             conn.commit()
             conn.close()
-            bot.send_message(message.chat.id, "⚠️ *Verification Clear! (Same Device)*\n\nAapka account activate ho gaya hai, par duplicate hardware match hone ki wajah se referral tracking disable kar di gayi hai.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            bot.send_message(message.chat.id, "⚠️ *Verification Clear! (Same Device Detected)*\n\nAapka account active ho gaya hai, par duplicate hardware signatures ki wajah se referral bonus valid nahi mana gaya.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
             return
             
         if incoming_status == "VERIFIED_OK":
+            # Fresh new physical hardware phone track
             cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (hw_token, user_id))
             
             if ref_by:
@@ -302,7 +304,7 @@ def handle_web_app_data(message):
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try:
-                        bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` ne unique verification clear kar li hai. ₹{per_invite} aapke wallet me add ho gaye hain!", parse_mode='Markdown')
+                        bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` ne verification pass kar li. ₹{per_invite} aapke wallet me add ho chuke hain!", parse_mode='Markdown')
                     except: pass
             
             conn.commit()
@@ -311,7 +313,7 @@ def handle_web_app_data(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Engine Processing Fault: {str(e)}")
 
-# --- CALLBACK INTERACTORS (FIXED CHANNEL VALIDATION LOOP) ---
+# --- FIXED INLINE CALLBACK CHECKER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -320,11 +322,10 @@ def handle_callbacks(call):
     
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
-        # Fix the loop: Once the user clicks "Claim", dynamically trigger the real device verification markup
-        bot.send_message(call.message.chat.id, "🛡️ *Channels checked! Now complete your device security scan:*", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
+        # TYPO FIXED: Using proper reply_markup parameter to eliminate endless loop blocks
+        bot.send_message(call.message.chat.id, "🛡️ *Channels Checked! Now click below to open Real Hardware Scan:*", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
-        
         cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
         last_time_str = cursor.fetchone()[0]
         now = datetime.now()
@@ -343,7 +344,6 @@ def handle_callbacks(call):
         cursor.execute("UPDATE users SET balance = balance + ?, last_bonus_time = ? WHERE user_id = ?", (dice_roll, now.strftime('%Y-%m-%d %H:%M:%S'), user_id))
         conn.commit()
         bot.send_message(call.message.chat.id, f"🎲 *Dice Rolled!* You got ₹{dice_roll}!")
-        
     elif call.data == "view_bot_fund":
         bot.answer_callback_query(call.id)
         cursor.execute("SELECT bot_fund FROM settings WHERE id = 1")
@@ -366,7 +366,7 @@ def handle_callbacks(call):
         bot.register_next_step_handler(msg, process_ludo_bet, choice)
     conn.close()
 
-# --- MENU TEXT INTERACTION PLATFORM ---
+# --- STANDALONE CONVERSATION TEXT CONTROLLER ---
 @bot.message_handler(func=lambda msg: True)
 def handle_menu_click(message):
     user_id = message.from_user.id
@@ -377,9 +377,10 @@ def handle_menu_click(message):
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
     user_status = cursor.fetchone()
     
+    # TYPO RESTORED RIGHT HERE: reply_verify changed back to correct structural reply_markup parameter
     if not user_status or user_status[0] == 0:
         conn.close()
-        bot.send_message(message.chat.id, "🛡️ *Please complete your verification first:*", parse_mode='Markdown', reply_verify=get_verify_keyboard(message.chat.id))
+        bot.send_message(message.chat.id, "🛡️ *Please complete your hardware verification setup first:*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
         return
 
     balance = user_status[1]
@@ -487,7 +488,7 @@ def process_ludo_bet(message, choice):
     except ValueError:
         bot.send_message(message.chat.id, "❌ Cancelled. Enter numerical values only.")
 
-# --- ENGINE SHUTTLE PLATFORM ---
+# --- WEB APP PROCESS START ENGINE ---
 if __name__ == '__main__':
     import threading
     threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
