@@ -16,7 +16,7 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 DB_FILE = 'bot_data.db'
 
-# --- DB CONNECTION WITH WAL SPEED ENGINE ---
+# --- DB CONNECTION ---
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
     conn.execute('PRAGMA journal_mode=WAL;')
@@ -43,20 +43,20 @@ def init_db():
 
 init_db()
 
-# --- HARDENED WEBAPP ENGINE WITH DYNAMIC LIVE LOADING SCANNER ---
+# --- FIXED DYNAMIC LOADING ANTI-CHEAT UI ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hardware Anti-Cheat Engine</title>
+    <title>Device Verification</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { background-color: #0b0e14; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-        .container { background-color: #151a24; border-radius: 24px; padding: 40px 20px; text-align: center; width: 85%; max-width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); border: 1px solid #1f293d; transition: all 0.4s ease; }
+        .container { background-color: #151a24; border-radius: 24px; padding: 40px 20px; text-align: center; width: 85%; max-width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); border: 1px solid #1f293d; }
         
-        /* Loading Spinner */
+        /* Loader Spinner */
         .spinner { width: 80px; height: 80px; border: 4px solid rgba(255, 255, 255, 0.1); border-top: 4px solid #00b0ff; border-radius: 50%; margin: 0 auto 30px auto; animation: spin 1s linear infinite; }
         
         /* Status Icons */
@@ -66,10 +66,10 @@ HTML_TEMPLATE = """
         .danger-icon { border: 3px solid #ff1744; background: rgba(255, 23, 68, 0.1); box-shadow: 0 0 20px rgba(255, 23, 68, 0.2); }
         .danger-icon::after { content: "✕"; font-size: 40px; color: #ff1744; font-weight: bold; }
         
-        h2 { color: #ffffff; font-size: 22px; margin-bottom: 12px; font-weight: 700; transition: color 0.3s; }
+        h2 { color: #ffffff; font-size: 22px; margin-bottom: 12px; font-weight: 700; }
         p { color: #90a4ae; font-size: 14px; line-height: 1.6; margin-bottom: 35px; min-height: 45px; }
         
-        .btn { background: linear-gradient(135deg, #78909c 0%, #455a64 100%); color: #ffffff; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: bold; width: 100%; cursor: not-allowed; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; transition: all 0.3s ease; pointer-events: none; }
+        .btn { background: linear-gradient(135deg, #78909c 0%, #455a64 100%); color: #ffffff; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: bold; width: 100%; cursor: not-allowed; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; pointer-events: none; transition: all 0.3s ease; }
         .btn.active-success { background: linear-gradient(135deg, #00e676 0%, #00b0ff 100%); color: #0b0e14; cursor: pointer; opacity: 1; pointer-events: auto; box-shadow: 0 5px 20px rgba(0, 230, 118, 0.4); }
         .btn.active-danger { background: linear-gradient(135deg, #ff1744 0%, #ff9100 100%); color: #ffffff; cursor: pointer; opacity: 1; pointer-events: auto; box-shadow: 0 5px 20px rgba(255, 23, 68, 0.4); }
         
@@ -81,8 +81,8 @@ HTML_TEMPLATE = """
     <div class="container">
         <div id="loader" class="spinner"></div>
         <div id="statusIcon" class="icon-box"></div>
-        <h2 id="mainHeading">Initializing Scanner...</h2>
-        <p id="subText">Connecting secure sandbox engine to process physical device components...</p>
+        <h2 id="mainHeading">Device Checking...</h2>
+        <p id="subText">Please wait 3-5 seconds while we verify your hardware identity configurations...</p>
         <button id="actionBtn" class="btn" onclick="secureSubmit()">Processing...</button>
     </div>
 
@@ -90,6 +90,10 @@ HTML_TEMPLATE = """
         const tg = window.Telegram.WebApp;
         tg.expand();
         tg.ready();
+
+        // Get user_id safely from URL params instead of initDataUnsafe
+        const urlParams = new URLSearchParams(window.location.search);
+        const tgUserId = urlParams.get('user_id');
 
         function getHardwareFingerprint() {
             const canvas = document.createElement('canvas');
@@ -111,56 +115,51 @@ HTML_TEMPLATE = """
         }
 
         const hwToken = getHardwareFingerprint();
-        const tgUserId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
         
-        // Step-by-Step 3 to 5 Second Loader Logic
+        // Stage 1 Loading Text Update (after 1.5 seconds)
         setTimeout(() => {
-            document.getElementById('mainHeading').innerText = "Analyzing Hardware Profile...";
-            document.getElementById('subText').innerText = "Extracting device GPU core rendering signatures and systemic token maps...";
-        }, 1200);
+            document.getElementById('mainHeading').innerText = "Analyzing Telemetry...";
+            document.getElementById('subText').innerText = "Checking device duplications and anti-bypass system registry...";
+        }, 1500);
 
+        // Stage 2 Verification Finalizing (Total ~4 seconds loader)
         setTimeout(() => {
-            document.getElementById('mainHeading').innerText = "Checking Fraud Database...";
-            document.getElementById('subText').innerText = "Cross-referencing telemetry structures against existing device mappings...";
-            
             fetch(`/api/check_device?hw_token=${hwToken}&user_id=${tgUserId}`)
                 .then(res => res.json())
                 .then(data => {
-                    setTimeout(() => {
-                        document.getElementById('loader').style.display = "none";
-                        const iconEl = document.getElementById('statusIcon');
-                        const btnEl = document.getElementById('actionBtn');
-                        iconEl.style.display = "flex";
+                    document.getElementById('loader').style.display = "none";
+                    const iconEl = document.getElementById('statusIcon');
+                    const btnEl = document.getElementById('actionBtn');
+                    iconEl.style.display = "flex";
 
-                        if(data.is_duplicate) {
-                            // CASE A: Duplicate / Same Device Detected
-                            iconEl.classList.add('danger-icon');
-                            document.getElementById('mainHeading').innerText = "Same Device Detected!";
-                            document.getElementById('mainHeading').style.color = "#ff1744";
-                            document.getElementById('subText').innerText = "This device is already linked to an existing account. You can continue, but referral rewards are disabled.";
-                            btnEl.innerText = "Continue to Bot";
-                            btnEl.className = "btn active-danger";
-                            btnEl.setAttribute('data-status', 'VERIFIED_SAME_DEVICE');
-                        } else {
-                            // CASE B: Pure Unique Real Device Approved
-                            iconEl.classList.add('success-icon');
-                            document.getElementById('mainHeading').innerText = "Device Checked Successfully";
-                            document.getElementById('mainHeading').style.color = "#00e676";
-                            document.getElementById('subText').innerText = "Your hardware profile is verified as genuine and unique. Full system functionality authorized.";
-                            btnEl.innerText = "Continue to Bot";
-                            btnEl.className = "btn active-success";
-                            btnEl.setAttribute('data-status', 'VERIFIED_OK');
-                        }
-                    }, 1300);
+                    if(data.is_duplicate) {
+                        // SAME DEVICE DETECTED FLOW
+                        iconEl.classList.add('danger-icon');
+                        document.getElementById('mainHeading').innerText = "Same Device Detected";
+                        document.getElementById('mainHeading').style.color = "#ff1744";
+                        document.getElementById('subText').innerText = "This device is already registered with another account. Referral system bypassed.";
+                        btnEl.innerText = "Continue to Bot";
+                        btnEl.className = "btn active-danger";
+                        btnEl.setAttribute('data-status', 'VERIFIED_SAME_DEVICE');
+                    } else {
+                        // UNIQUE GENUINE DEVICE FLOW
+                        iconEl.classList.add('success-icon');
+                        document.getElementById('mainHeading').innerText = "Device Checked Successfully";
+                        document.getElementById('mainHeading').style.color = "#00e676";
+                        document.getElementById('subText').innerText = "Your hardware profile is fully verified as unique. System access allowed safely.";
+                        btnEl.innerText = "Continue to Bot";
+                        btnEl.className = "btn active-success";
+                        btnEl.setAttribute('data-status', 'VERIFIED_OK');
+                    }
                 }).catch(() => {
                     document.getElementById('loader').style.display = "none";
                     document.getElementById('statusIcon').style.display = "flex";
                     document.getElementById('statusIcon').classList.add('success-icon');
-                    document.getElementById('mainHeading').innerText = "Device Check Finished";
+                    document.getElementById('mainHeading').innerText = "Device Checked Successfully";
                     document.getElementById('actionBtn').className = "btn active-success";
                     document.getElementById('actionBtn').innerText = "Continue to Bot";
                 });
-        }, 2500);
+        }, 3500);
 
         function secureSubmit() {
             const btnEl = document.getElementById('actionBtn');
@@ -181,7 +180,7 @@ HTML_TEMPLATE = """
 def verify_page():
     return render_template_string(HTML_TEMPLATE)
 
-# --- BACKEND MULTI-ACCOUNT CHECK API ---
+# --- FIXED API: HANDLES INTEGER PARSING SAFELY ---
 @app.route('/api/check_device')
 def check_device():
     hw_token = request.args.get('hw_token', '')
@@ -190,9 +189,16 @@ def check_device():
     if not hw_token or not user_id or user_id in ["null", "None", ""]:
         return {"is_duplicate": False}
         
+    try:
+        current_uid = int(user_id)
+    except ValueError:
+        return {"is_duplicate": False}
+        
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (hw_token, int(user_id)))
+    
+    # Check if this device token exists under ANY OTHER user id
+    cursor.execute("SELECT user_id FROM users WHERE device_token = ? AND user_id != ?", (hw_token, current_uid))
     duplicate = cursor.fetchone()
     conn.close()
     
@@ -204,7 +210,7 @@ def check_device():
 def home():
     return "Bot Core Service Active"
 
-# --- KEYBOARDS ---
+# --- SYSTEM KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -241,7 +247,7 @@ def start(message):
             cursor.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?, ?)", (referrer, user_id))
         conn.commit()
     else:
-        if user[5] == 1: # is_verified checking
+        if user[5] == 1: 
             bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
             conn.close()
             return
@@ -263,7 +269,7 @@ def start(message):
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
-# --- WEB APP TELEMETRY PIPE RECEIVER ---
+# --- TELEMETRY RESPONSE ENGINE ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
@@ -279,21 +285,19 @@ def handle_web_app_data(message):
         ref_by = cursor.fetchone()[0]
         
         if incoming_status == "VERIFIED_SAME_DEVICE":
-            # Target fraud user gets access to features, but inviter gets NO WALLET CREDIT
-            cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
+            cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (hw_token, user_id))
             if ref_by:
                 cursor.execute("UPDATE referrals SET status = 'Failed: Same Device Flag' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                 try:
-                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device Flag)!*\n\nUser `{user_id}` ne aapke link se join kiya par same device use karne ki wajah se credit stop kar diya gaya.", parse_mode='Markdown')
+                    bot.send_message(ref_by, f"⚠️ *Referral Failed (Same Device)!*\n\nUser `{user_id}` ne click kiya par device duplicate mila, isliye bonus cancel.", parse_mode='Markdown')
                 except: pass
             
             conn.commit()
             conn.close()
-            bot.send_message(message.chat.id, "⚠️ *Verification Clear! (Same Device Detected)*\n\nAapka account active ho gaya hai, par duplicate hardware signatures ki wajah se referral bonus valid nahi mana gaya.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            bot.send_message(message.chat.id, "⚠️ *Same Device Detected!*\n\nAapka device pehle se use ho chuka hai. Aap bot use kar sakte hain par aapke referrer ko rewards nahi milenge.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
             return
             
         if incoming_status == "VERIFIED_OK":
-            # Fresh new physical hardware phone track
             cursor.execute("UPDATE users SET is_verified = 1, device_token = ? WHERE user_id = ?", (hw_token, user_id))
             
             if ref_by:
@@ -304,16 +308,16 @@ def handle_web_app_data(message):
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (per_invite,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try:
-                        bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` ne verification pass kar li. ₹{per_invite} aapke wallet me add ho chuke hain!", parse_mode='Markdown')
+                        bot.send_message(ref_by, f"🔔 *New Unique Referral!*\nUser ID `{user_id}` verified uniquely. ₹{per_invite} added!", parse_mode='Markdown')
                     except: pass
             
             conn.commit()
             conn.close()
-            bot.send_message(message.chat.id, "✅ *Verified Successfully!*\n\nWelcome! Aap ab bot use kar sakte hain.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            bot.send_message(message.chat.id, "✅ *Device Checked Successfully!*\n\nWelcome! Aap ab bot use kar sakte hain.", reply_markup=get_main_keyboard(), parse_mode='Markdown')
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Engine Processing Fault: {str(e)}")
+        bot.send_message(message.chat.id, f"❌ Engine Fault: {str(e)}")
 
-# --- FIXED INLINE CALLBACK CHECKER ---
+# --- INLINE CALLBACK CHECKER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -322,7 +326,6 @@ def handle_callbacks(call):
     
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
-        # TYPO FIXED: Using proper reply_markup parameter to eliminate endless loop blocks
         bot.send_message(call.message.chat.id, "🛡️ *Channels Checked! Now click below to open Real Hardware Scan:*", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
@@ -377,7 +380,6 @@ def handle_menu_click(message):
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
     user_status = cursor.fetchone()
     
-    # TYPO RESTORED RIGHT HERE: reply_verify changed back to correct structural reply_markup parameter
     if not user_status or user_status[0] == 0:
         conn.close()
         bot.send_message(message.chat.id, "🛡️ *Please complete your hardware verification setup first:*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
@@ -488,7 +490,7 @@ def process_ludo_bet(message, choice):
     except ValueError:
         bot.send_message(message.chat.id, "❌ Cancelled. Enter numerical values only.")
 
-# --- WEB APP PROCESS START ENGINE ---
+# --- PLATFORM RUNNER ---
 if __name__ == '__main__':
     import threading
     threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
