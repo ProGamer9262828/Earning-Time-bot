@@ -51,7 +51,7 @@ def cmd_reset_me(message):
     cursor.execute("UPDATE users SET is_verified = 0, device_token = NULL WHERE user_id = ?", (message.from_user.id,))
     conn.commit()
     conn.close()
-    bot.reply_to(message, "🔄 Verification status clear! Ab test karne ke liye firse `/start` karein.")
+    bot.reply_to(message, "🔄 Aapka account testing ke liye reset ho gaya hai! Ab shuru se check kijiye.")
 
 @bot.message_handler(commands=['setchannels'])
 def cmd_set_channels(message):
@@ -125,7 +125,9 @@ def is_user_joined_all(user_id):
         try:
             member = bot.get_chat_member(ch, user_id)
             if member.status in ['left', 'kicked']: return False
-        except: 
+        except Exception as e:
+            # AGAR BOT CHANNEL ME ADMIN NAHI HAI TO ERROR SE BACHNE KE LIYE LOG KAREIN
+            print(f"Channel check bypass/error for {ch}: {str(e)}")
             return False
     return True
 
@@ -241,7 +243,7 @@ def start(message):
         is_verified = user[0]
     conn.close()
             
-    # STEP 1: Check Mandatory Channels
+    # STEP 1: Mandatory Channels Check
     channels = get_clean_channels()
     if channels and not is_user_joined_all(user_id):
         markup = types.InlineKeyboardMarkup(row_width=1)
@@ -252,12 +254,12 @@ def start(message):
         bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click 'Checked / Joined' Button*", parse_mode='Markdown', reply_markup=markup)
         return
 
-    # STEP 2: Check Hardware Status
+    # STEP 2: Hardware Verification Check
     if is_verified == 0 and get_verify_status() == "on":
         bot.send_message(message.chat.id, "🛡️ *Channels Checked!* Now verify your device hardware to get access:", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
         return
 
-    # STEP 3: Enter Main Lobby
+    # STEP 3: Main Lobby Entry
     bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
 
 
@@ -267,7 +269,10 @@ def handle_callbacks(call):
     try:
         if call.data == "check_channels":
             bot.answer_callback_query(call.id)
-            if is_user_joined_all(user_id):
+            
+            # Pure validation logic ko explicit handling de di hai taaki crash na ho
+            joined = is_user_joined_all(user_id)
+            if joined:
                 if get_verify_status() == "on":
                     bot.send_message(call.message.chat.id, "🛡️ *Channels Verified!* Ab niche diye gaye button par click karke anti-cheat verification complete karein:", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
                 else:
@@ -281,9 +286,11 @@ def handle_callbacks(call):
                 bot.send_message(call.message.chat.id, "❌ *Sabh channels join nahi kiya!* Pehle upar diye gaye saare channels join karein.")
             return
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"⚠️ Error parsing: {str(e)}")
+        print(f"Callback error: {str(e)}")
+        bot.send_message(call.message.chat.id, "⚠️ System validation issue. Please make sure bot is admin in the channels.")
         return
     
+    # Baaki bache callbacks ke liye DB connection handles
     conn = get_db_connection()
     cursor = conn.cursor()
     if call.data == "daily_bonus":
@@ -343,7 +350,7 @@ def handle_web_app_data(message):
                 cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
                 pi, fund = cursor.fetchone()
                 if fund >= pi:
-                    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (pi, ref_by)) # <-- FIXED SYNTAX ERR HERE (? added)
+                    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (pi, ref_by))
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (pi,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try: bot.send_message(ref_by, f"🔔 *New Referral Alert!* Earned ₹{pi}.")
