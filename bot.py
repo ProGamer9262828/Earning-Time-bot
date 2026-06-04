@@ -16,7 +16,6 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 DB_FILE = 'bot_data.db'
 
-# --- SAFE DB CONNECTION PIPELINE ---
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL;')
@@ -44,7 +43,7 @@ def init_db():
 
 init_db()
 
-# --- ADMIN CORE COMMANDS ---
+# --- ADMIN COMMANDS ---
 @bot.message_handler(commands=['setchannels'])
 def cmd_set_channels(message):
     if message.from_user.id != ADMIN_ID: return
@@ -58,7 +57,17 @@ def cmd_set_channels(message):
         channels_list = []
         msg = "✅ Saare mandatory channels hata diye gaye hain!"
     else:
-        channels_list = [ch.strip() for ch in input_val.split(",") if ch.strip()]
+        # Auto clean channels formatting format
+        raw_list = input_val.split(",")
+        channels_list = []
+        for ch in raw_list:
+            ch_clean = ch.strip()
+            if ch_clean:
+                if "t.me/" in ch_clean:
+                    ch_clean = "@" + ch_clean.split("t.me/")[1].replace("@", "")
+                elif not ch_clean.startswith("@") and not ch_clean.lstrip('-').isdigit():
+                    ch_clean = "@" + ch_clean
+                channels_list.append(ch_clean)
         msg = f"✅ Mandatory channels updated: {', '.join(channels_list)}"
         
     conn = get_db_connection()
@@ -84,7 +93,6 @@ def cmd_set_verify(message):
     conn.close()
     bot.reply_to(message, f"⚙️ Verification System ab **{status.upper()}** ho chuka hai!", parse_mode="Markdown")
 
-# --- CORE LOGIC FETCHERS ---
 def get_clean_channels():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -105,16 +113,14 @@ def get_verify_status():
 def is_user_joined_all(user_id):
     channels = get_clean_channels()
     for ch in channels:
-        chat_target = ch.replace("https://t.me/", "@") if "t.me" in ch else ch
-        if not chat_target.startswith("@") and not chat_target.lstrip('-').isdigit():
-            chat_target = f"@{chat_target}"
         try:
-            member = bot.get_chat_member(chat_target, user_id)
+            member = bot.get_chat_member(ch, user_id)
             if member.status in ['left', 'kicked']: return False
-        except: continue
+        except: 
+            continue
     return True
 
-# --- HTML TELEMETRY ENGINE & WEBAPP ROUTING ---
+# --- HTML WEBAPP ENGINE ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -189,7 +195,6 @@ def check_device():
 @app.route('/')
 def home(): return "Core Framework Active"
 
-# --- SYSTEM KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -202,7 +207,6 @@ def get_verify_keyboard(chat_id):
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=f"{RAILWAY_DOMAIN}/verify_page?user_id={chat_id}")))
     return markup
 
-# --- ENGINE COMMAND ROUTER ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -232,22 +236,19 @@ def start(message):
         bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
         return
             
-    # Workflow Phase 1: Mandatory Join Validation Check
     channels = get_clean_channels()
     if channels and not is_user_joined_all(user_id):
         markup = types.InlineKeyboardMarkup(row_width=1)
         for index, ch in enumerate(channels, 1):
-            url = ch if ch.startswith("http") else f"https://t.me/{ch.replace('@', '')}"
+            url = f"https://t.me/{ch.replace('@', '')}"
             markup.add(types.InlineKeyboardButton(text=f"↗️ Join Channel {index}", url=url))
         markup.add(types.InlineKeyboardButton(text="✔️ Checked / Joined ✅", callback_data="check_channels"))
         bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click 'Checked / Joined' Button*", parse_mode='Markdown', reply_markup=markup)
         return
 
-    # Workflow Phase 2: Condition Verification Toggle Config
     if get_verify_status() == "on":
         bot.send_message(message.chat.id, "🛡️ *Channels Checked!* Now verify your device hardware to get access:", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
     else:
-        # Instant Bypass Integration Setup
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET is_verified = 1 WHERE user_id = ?", (user_id,))
@@ -255,7 +256,6 @@ def start(message):
         conn.close()
         bot.send_message(message.chat.id, "✅ *Welcome to Lobby!* (System Auto-Approved)", reply_markup=get_main_keyboard())
 
-# --- PLATFORM TELEMETRY PIPELINE ---
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     user_id = message.from_user.id
@@ -283,7 +283,7 @@ def handle_web_app_data(message):
                 pi, fund = cursor.fetchone()
                 if fund >= pi:
                     cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (pi, ref_by))
-                    cursor.execute("UPDATE settings SET bot_fund = fund - ? WHERE id = 1", (pi,))
+                    cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (pi,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try: bot.send_message(ref_by, f"🔔 *New Referral Alert!* Earned ₹{pi}.")
                     except: pass
@@ -292,7 +292,6 @@ def handle_web_app_data(message):
             bot.send_message(message.chat.id, "✅ *Device Verification Done!* Access Granted.", reply_markup=get_main_keyboard())
     except: pass
 
-# --- CALLBACK ROUTER SYSTEM ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -311,7 +310,6 @@ def handle_callbacks(call):
         else:
             bot.send_message(call.message.chat.id, "❌ *Sabh channels join nahi kiya!* Pehle upar diye gaye saare channels join karein.")
     
-    # Rest of callback routines
     conn = get_db_connection()
     cursor = conn.cursor()
     if call.data == "daily_bonus":
@@ -345,7 +343,6 @@ def handle_callbacks(call):
         bot.register_next_step_handler(msg, process_ludo_bet, ch)
     conn.close()
 
-# --- LOBBY INTERFACES INTERMEDIARY HANDLER ---
 @bot.message_handler(func=lambda msg: True)
 def handle_menu_click(message):
     user_id = message.from_user.id
