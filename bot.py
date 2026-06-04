@@ -16,7 +16,7 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 DB_FILE = 'bot_data.db'
 
-# --- DB CONNECTION ---
+# --- SAFE DB CONNECTION PIPELINE ---
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL;')
@@ -35,39 +35,61 @@ def init_db():
                         id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referee_id INTEGER, status TEXT DEFAULT 'Started (Unverified)')''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS withdraws (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, upi_id TEXT, status TEXT DEFAULT 'Pending')''')
+    
+    # Check table structure and ensure accurate default values
     cursor.execute("SELECT COUNT(*) FROM settings")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO settings VALUES (1, 5.0, 20.0, 100000.0, 'https://t.me/your_channel', '[]')")
+        cursor.execute("INSERT INTO settings VALUES (1, 5.0, 20.0, 100000.0, 'https://t.me/your_channel', '[\"@A_ToolsX\"]')")
+    else:
+        # Auto-Migration: If existing data is corrupted or plain text, rewrite safely to avoid crash loops
+        cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
+        existing_val = cursor.fetchone()[0]
+        if existing_val and not existing_val.startswith("["):
+            # Plain string optimization to clean JSON Array
+            clean_val = json.dumps([existing_val])
+            cursor.execute("UPDATE settings SET mandatory_channels = ? WHERE id = 1", (clean_val,))
+            
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- HELPER: CHECK IF USER JOINED CHANNELS ---
-def is_user_joined_all(user_id):
+# --- SAFE CHANNEL EXTRACTION LOGIC ---
+def get_clean_channels():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
-    channels_str = cursor.fetchone()[0]
+    row = cursor.fetchone()
     conn.close()
     
+    if not row or not row[0]:
+        return []
+    
+    val = row[0].strip()
     try:
-        channels = json.loads(channels_str) if channels_str else []
+        channels = json.loads(val)
+        if isinstance(channels, list):
+            return channels
+        return [str(channels)]
     except:
-        channels = []
-        
+        if val.startswith("http") or val.startswith("@"):
+            return [val]
+        return []
+
+def is_user_joined_all(user_id):
+    channels = get_clean_channels()
     if not channels:
         return True
 
     for ch in channels:
-        # Agar link format me hai, to username extract karne ki koshish karein
         chat_target = ch.replace("https://t.me/", "@") if "t.me" in ch else ch
+        if not chat_target.startswith("@") and not chat_target.lstrip('-').isdigit():
+            chat_target = f"@{chat_target}"
         try:
             member = bot.get_chat_member(chat_target, user_id)
             if member.status in ['left', 'kicked']:
                 return False
         except Exception:
-            # Agar bot admin nahi hai ya private channel hai, toh user ko safe rakhne ke liye bypass na rokein
             continue
     return True
 
@@ -219,7 +241,7 @@ def check_device():
 def home():
     return "Bot Core Service Active"
 
-# --- SYSTEM KEYBOARDS ---
+# --- KEYBOARDS ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton('🎉 Gift Code'), types.KeyboardButton('💰 Balance'))
@@ -233,7 +255,7 @@ def get_verify_keyboard(chat_id):
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
     return markup
 
-# --- START ROUTER WITH FIXED CHANNEL KEYBOARD ---
+# --- COMPREHENSIVE CRASH-PROOF START ROUTER ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -260,27 +282,22 @@ def start(message):
         is_verified = 0
     else:
         is_verified = user[0]
+    conn.close()
         
     if is_verified == 1: 
-        conn.close()
         bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
         return
             
-    cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
-    channels_str = cursor.fetchone()[0]
-    try:
-        channels = json.loads(channels_str) if channels_str else []
-    except:
-        channels = []
-    conn.close()
+    channels = get_clean_channels()
     
-    # Check if already joined channels to skip directly to verification
+    # Validation Check: Explicitly build Markup rows
     if channels and not is_user_joined_all(user_id):
         markup = types.InlineKeyboardMarkup(row_width=1)
         for index, ch in enumerate(channels, 1):
             btn_url = ch if ch.startswith("http") else f"https://t.me/{ch.replace('@', '')}"
             markup.add(types.InlineKeyboardButton(text=f"↗️ Join Channel {index}", url=btn_url))
         markup.add(types.InlineKeyboardButton(text="✔️ Checked / Joined ✅", callback_data="check_channels"))
+        
         bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click 'Checked / Joined' Button*", parse_mode='Markdown', reply_markup=markup)
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
@@ -330,7 +347,7 @@ def handle_web_app_data(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Engine Fault: {str(e)}")
 
-# --- INLINE CALL ROUTER WITH VERIFICATION CHECK ---
+# --- CALLBACK CONTROLLER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -400,7 +417,6 @@ def handle_menu_click(message):
     
     if not user_status or user_status[0] == 0:
         conn.close()
-        # Direct redirect back to channel flow if not even verified
         start(message)
         return
 
