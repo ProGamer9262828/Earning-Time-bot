@@ -51,7 +51,7 @@ def cmd_reset_me(message):
     cursor.execute("UPDATE users SET is_verified = 0, device_token = NULL WHERE user_id = ?", (message.from_user.id,))
     conn.commit()
     conn.close()
-    bot.reply_to(message, "🔄 Aapka account testing ke liye reset ho gaya hai! Ab shuru se check kijiye.")
+    bot.reply_to(message, "🔄 Verification status clear! Ab test karne ke liye firse `/start` karein.")
 
 @bot.message_handler(commands=['setchannels'])
 def cmd_set_channels(message):
@@ -241,7 +241,7 @@ def start(message):
         is_verified = user[0]
     conn.close()
             
-    # STEP 1: Pehle check karo ki user ne mandatory channels join kiye hain ya nahi
+    # STEP 1: Check Mandatory Channels
     channels = get_clean_channels()
     if channels and not is_user_joined_all(user_id):
         markup = types.InlineKeyboardMarkup(row_width=1)
@@ -252,12 +252,12 @@ def start(message):
         bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click 'Checked / Joined' Button*", parse_mode='Markdown', reply_markup=markup)
         return
 
-    # STEP 2: Agar channel joined hain par user verified nahi hai, toh Hardware Verification dikhao
+    # STEP 2: Check Hardware Status
     if is_verified == 0 and get_verify_status() == "on":
         bot.send_message(message.chat.id, "🛡️ *Channels Checked!* Now verify your device hardware to get access:", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
         return
 
-    # STEP 3: Agar sab clear hai toh Direct Main Lobby open karo
+    # STEP 3: Enter Main Lobby
     bot.send_message(message.chat.id, "👋 Welcome back to the main lobby!", reply_markup=get_main_keyboard())
 
 
@@ -267,10 +267,8 @@ def handle_callbacks(call):
     try:
         if call.data == "check_channels":
             bot.answer_callback_query(call.id)
-            # Jab user button click karega tab verification status check hoga
             if is_user_joined_all(user_id):
                 if get_verify_status() == "on":
-                    # Channel join karne ke just baad webapp verification button aayega
                     bot.send_message(call.message.chat.id, "🛡️ *Channels Verified!* Ab niche diye gaye button par click karke anti-cheat verification complete karein:", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
                 else:
                     conn = get_db_connection()
@@ -336,7 +334,6 @@ def handle_web_app_data(message):
             if ref_by: cursor.execute("UPDATE referrals SET status = 'Failed: Same Device Flag' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
             conn.commit()
             conn.close()
-            # Verification clear hone ke baad hi lobby me entry
             bot.send_message(message.chat.id, "⚠️ *Same Device Detected!* Registration allowed without referral reward validation.", reply_markup=get_main_keyboard())
             return
             
@@ -346,14 +343,13 @@ def handle_web_app_data(message):
                 cursor.execute("SELECT per_invite, bot_fund FROM settings WHERE id = 1")
                 pi, fund = cursor.fetchone()
                 if fund >= pi:
-                    cursor.execute("UPDATE users SET balance = balance + WHERE user_id = ?", (pi, ref_by))
+                    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (pi, ref_by)) # <-- FIXED SYNTAX ERR HERE (? added)
                     cursor.execute("UPDATE settings SET bot_fund = bot_fund - ? WHERE id = 1", (pi,))
                     cursor.execute("UPDATE referrals SET status = 'Success & Verified' WHERE referrer_id = ? AND referee_id = ?", (ref_by, user_id))
                     try: bot.send_message(ref_by, f"🔔 *New Referral Alert!* Earned ₹{pi}.")
                     except: pass
             conn.commit()
             conn.close()
-            # Verification successful hone par final main lobby open
             bot.send_message(message.chat.id, "✅ *Device Verification Done!* Access Granted to Main Lobby.", reply_markup=get_main_keyboard())
     except: pass
 
@@ -368,7 +364,6 @@ def handle_menu_click(message):
     cursor.execute("SELECT is_verified, balance FROM users WHERE user_id = ?", (user_id,))
     u_status = cursor.fetchone()
     
-    # Security layer: Agar user unverified hai toh use menu access nahi milega, automatic /start standard rule trigger ho jayega
     if not u_status or u_status[0] == 0 or not is_user_joined_all(user_id):
         conn.close()
         start(message)
