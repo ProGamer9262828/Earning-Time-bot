@@ -16,7 +16,7 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 DB_FILE = 'bot_data.db'
 
-# --- DB CONNECTION WITH HIGHSPEED LOCKS ---
+# --- DB CONNECTION ---
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL;')
@@ -42,6 +42,34 @@ def init_db():
     conn.close()
 
 init_db()
+
+# --- HELPER: CHECK IF USER JOINED CHANNELS ---
+def is_user_joined_all(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT mandatory_channels FROM settings WHERE id = 1")
+    channels_str = cursor.fetchone()[0]
+    conn.close()
+    
+    try:
+        channels = json.loads(channels_str) if channels_str else []
+    except:
+        channels = []
+        
+    if not channels:
+        return True
+
+    for ch in channels:
+        # Agar link format me hai, to username extract karne ki koshish karein
+        chat_target = ch.replace("https://t.me/", "@") if "t.me" in ch else ch
+        try:
+            member = bot.get_chat_member(chat_target, user_id)
+            if member.status in ['left', 'kicked']:
+                return False
+        except Exception:
+            # Agar bot admin nahi hai ya private channel hai, toh user ko safe rakhne ke liye bypass na rokein
+            continue
+    return True
 
 # --- ANTI-CHEAT WEBAPP ENGINE ---
 HTML_TEMPLATE = """
@@ -205,14 +233,13 @@ def get_verify_keyboard(chat_id):
     markup.add(types.KeyboardButton('🛡️ Click Here to Verify', web_app=types.WebAppInfo(url=web_app_url)))
     return markup
 
-# --- START ROUTER WITH STATE BYPASS LOCK ---
+# --- START ROUTER WITH FIXED CHANNEL KEYBOARD ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or f"User_{user_id}"
     text_split = message.text.split()
     
-    # Session cleanup to avoid thread collisions
     try:
         bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     except:
@@ -247,12 +274,14 @@ def start(message):
         channels = []
     conn.close()
     
-    if channels:
-        markup = types.InlineKeyboardMarkup()
+    # Check if already joined channels to skip directly to verification
+    if channels and not is_user_joined_all(user_id):
+        markup = types.InlineKeyboardMarkup(row_width=1)
         for index, ch in enumerate(channels, 1):
-            markup.add(types.InlineKeyboardButton(text=f"↗️ Join Channel {index}", url=ch))
-        markup.add(types.InlineKeyboardButton(text="✔️ Claim", callback_data="check_channels"))
-        bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click Claim*", parse_mode='Markdown', reply_markup=markup)
+            btn_url = ch if ch.startswith("http") else f"https://t.me/{ch.replace('@', '')}"
+            markup.add(types.InlineKeyboardButton(text=f"↗️ Join Channel {index}", url=btn_url))
+        markup.add(types.InlineKeyboardButton(text="✔️ Checked / Joined ✅", callback_data="check_channels"))
+        bot.send_message(message.chat.id, "👑 *Hey There! Welcome To Bot !!*\n\n⚪ *Join The Channels Below To Continue*\n\n😍 *After Joining Click 'Checked / Joined' Button*", parse_mode='Markdown', reply_markup=markup)
     else:
         bot.send_message(message.chat.id, "🛡️ *Verify Yourself To Start Bot*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
 
@@ -301,15 +330,20 @@ def handle_web_app_data(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Engine Fault: {str(e)}")
 
-# --- INLINE CALL ROUTER ---
+# --- INLINE CALL ROUTER WITH VERIFICATION CHECK ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
     conn = get_db_connection()
     cursor = conn.cursor()
+    
     if call.data == "check_channels":
         bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, "🛡️ *Channels Checked! Now click below to open Real Hardware Scan:*", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
+        if is_user_joined_all(user_id):
+            bot.send_message(call.message.chat.id, "🛡️ *Channels Verified Successfully!* Now click below to open Real Hardware Scan:", parse_mode="Markdown", reply_markup=get_verify_keyboard(user_id))
+        else:
+            bot.send_message(call.message.chat.id, "❌ *Aapne abhi saare channels join nahi kiye hain!* Kripya pehle upar diye gaye channels join karein.", parse_mode="Markdown")
+            
     elif call.data == "daily_bonus":
         bot.answer_callback_query(call.id)
         cursor.execute("SELECT last_bonus_time FROM users WHERE user_id = ?", (user_id,))
@@ -356,7 +390,6 @@ def handle_menu_click(message):
     user_id = message.from_user.id
     text = message.text
     
-    # Ignore standalone text /start commands here to avoid thread loop cascades
     if text.startswith('/start'):
         return
         
@@ -367,7 +400,8 @@ def handle_menu_click(message):
     
     if not user_status or user_status[0] == 0:
         conn.close()
-        bot.send_message(message.chat.id, "🛡️ *Please complete your hardware verification setup first:*", parse_mode='Markdown', reply_markup=get_verify_keyboard(message.chat.id))
+        # Direct redirect back to channel flow if not even verified
+        start(message)
         return
 
     balance = user_status[1]
