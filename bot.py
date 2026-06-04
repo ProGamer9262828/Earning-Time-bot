@@ -438,3 +438,11 @@ if __name__ == '__main__':
     import threading
     threading.Thread(target=bot.infinity_polling, kwargs={"skip_pending": True}, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)), debug=False, use_reloader=False)
+@bot.message_handler(commands=['resetme'])
+def cmd_reset_me(message):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET is_verified = 0, device_token = NULL WHERE user_id = ?", (message.from_user.id,))
+    conn.commit()
+    conn.close()
+    bot.reply_to(message, "🔄 Aapka account unverified reset ho gaya hai! Ab fir se `/start` karke test kijiye.")
